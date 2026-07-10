@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a1a2e">
+<title>포럼팀장</title>
+<style>
+  :root {
+    --bg: #12121a;
+    --card: #1e1e2a;
+    --card2: #26263a;
+    --text: #eaeaf0;
+    --sub: #9a9ab0;
+    --accent: #7c6ff0;
+    --accent2: #5a4fd0;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --border: #33334a;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    background: var(--bg); color: var(--text);
+    padding-bottom: 80px;
+    min-height: 100vh;
+  }
+  header {
+    padding: 16px 20px 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+  .icon-btn { background:none; border:none; color:var(--sub); font-size:22px; cursor:pointer; padding:4px 8px; }
+
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; animation: fade .2s; }
+  @keyframes fade { from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
+
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--card); border-top: 1px solid var(--border);
+    display: flex; z-index: 20;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button {
+    flex:1; background:none; border:none; color:var(--sub);
+    padding: 10px 0 8px; font-size: 11px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+  }
+  nav button .ico { font-size: 20px; }
+  nav button.active { color: var(--accent); }
+
+  .card {
+    background: var(--card); border-radius: 14px; padding: 16px;
+    margin-bottom: 14px; border: 1px solid var(--border);
+  }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+  .sub { color: var(--sub); font-size: 13px; }
+
+  button.primary {
+    background: var(--accent); color:#fff; border:none; border-radius: 10px;
+    padding: 13px 18px; font-size: 15px; font-weight: 600; cursor:pointer; width:100%;
+  }
+  button.primary:active { background: var(--accent2); }
+  button.primary:disabled { opacity:.4; }
+  button.ghost {
+    background: var(--card2); color: var(--text); border:1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; font-size: 14px; cursor:pointer;
+  }
+  button.danger { background:#3a2030; color:var(--red); border:1px solid #5a3040; border-radius:10px; padding:10px 14px; font-size:14px; cursor:pointer; }
+
+  input[type=text], input[type=password], input[type=date], textarea, select {
+    width:100%; background: var(--card2); border:1px solid var(--border);
+    border-radius: 10px; padding: 12px; color: var(--text); font-size: 15px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+  label.fld { display:block; font-size:13px; color:var(--sub); margin: 12px 0 6px; }
+
+  /* 출석부 */
+  .member-row {
+    display:flex; align-items:center; gap:10px; padding: 11px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .member-row:last-child { border-bottom:none; }
+  .member-name { flex:1; font-size:15px; }
+  .att-btns { display:flex; gap:6px; }
+  .att-btn {
+    border:1px solid var(--border); background:var(--card2); color:var(--sub);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor:pointer;
+  }
+  .att-btn.on-o { background:#16321f; color:var(--green); border-color:#2a5a3a; }
+  .att-btn.on-x { background:#3a2030; color:var(--red); border-color:#5a3040; }
+  .att-btn.on-l { background:#3a3220; color:var(--yellow); border-color:#5a5030; }
+
+  /* 녹음 */
+  .rec-circle {
+    width: 130px; height:130px; border-radius:50%; margin: 18px auto;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    background: var(--card2); border: 3px solid var(--border);
+    cursor:pointer; transition: all .3s; user-select:none;
+  }
+  .rec-circle.recording { border-color: var(--red); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.35);} 50%{box-shadow:0 0 0 16px rgba(248,113,113,0);} }
+  .rec-circle .ico { font-size: 38px; }
+  .rec-circle .t { font-size:13px; color:var(--sub); margin-top:4px; }
+  #recTimer { text-align:center; font-size: 26px; font-variant-numeric: tabular-nums; font-weight:600; }
+  #liveText {
+    white-space: pre-wrap; line-height:1.6; font-size:14px; max-height: 260px;
+    overflow-y:auto; color:#c8c8dc;
+  }
+  .status-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px; background:var(--card2); color:var(--sub); }
+  .status-badge.rec { background:#3a2030; color:var(--red); }
+  .status-badge.proc { background:#3a3220; color:var(--yellow); }
+
+  /* 일지 목록 */
+  .log-item { padding: 13px 4px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .log-item:last-child { border-bottom:none; }
+  .log-item .d { font-size:13px; color:var(--accent); }
+  .log-item .p { font-size:14px; color:var(--sub); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .note-item { padding: 12px 4px; border-bottom:1px solid var(--border); }
+  .note-item:last-child { border-bottom:none; }
+  .note-item .d { font-size:12px; color:var(--sub); }
+  .note-item .b { font-size:14px; margin-top:4px; line-height:1.5; white-space:pre-wrap; }
+  .note-item .name-tag { color: var(--accent); font-weight:600; }
+
+  .modal-bg {
+    position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+    display:none; align-items:flex-end; justify-content:center;
+  }
+  .modal-bg.open { display:flex; }
+  .modal {
+    background: var(--card); width:100%; max-width:640px; max-height: 88vh;
+    border-radius: 18px 18px 0 0; padding: 20px; overflow-y:auto;
+  }
+  .modal h3 { font-size:16px; margin-bottom:14px; }
+  .row2 { display:flex; gap:8px; margin-top:12px; }
+  .row2 > * { flex:1; }
+  .toast {
+    position:fixed; bottom: 90px; left:50%; transform:translateX(-50%);
+    background:#333350; color:#fff; padding:10px 20px; border-radius:24px;
+    font-size:14px; z-index:100; opacity:0; transition:opacity .3s; pointer-events:none;
+    white-space:nowrap;
+  }
+  .toast.show { opacity:1; }
+  .empty { text-align:center; color:var(--sub); font-size:14px; padding: 24px 0; }
+  .chip { font-size:12px; color:var(--sub); background:var(--card2); padding:4px 10px; border-radius:14px; }
+  pre.report { white-space:pre-wrap; font-family:inherit; font-size:14px; line-height:1.65; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>포럼<span>팀장</span></h1>
+  <button class="icon-btn" onclick="showPage('settings')">⚙️</button>
+</header>
+
+<main>
+  <!-- ============ 홈: 포럼 세션 ============ -->
+  <div class="page active" id="page-forum">
+    <div class="card">
+      <h2>🎙️ 포럼 세션 <span class="status-badge" id="recStatus">대기 중</span></h2>
+      <label class="fld">포럼 날짜</label>
+      <input type="date" id="forumDate">
+      <label class="fld">1부 말씀 제목</label>
+      <input type="text" id="sermon1" placeholder="예: 생명의 떡, 만나로 오신 예수 그리스도를 대대로 기념하라">
+      <label class="fld">2부 말씀 제목</label>
+      <input type="text" id="sermon2" placeholder="예: 요나의 표적보다 더 크신 예수 그리스도를 바라보라">
+      <div class="rec-circle" id="recCircle" onclick="toggleRecording()">
+        <div class="ico" id="recIco">🎙️</div>
+        <div class="t" id="recLabel">탭하여 녹음 시작</div>
+      </div>
+      <div id="recTimer">00:00</div>
+      <p class="sub" style="text-align:center; margin-top:8px;">녹음 중에는 화면을 꺼도 됩니다. 포럼에만 집중하세요.<br>약 1분마다 자동으로 텍스트로 변환됩니다.</p>
+    </div>
+
+    <div class="card">
+      <h2>📝 실시간 변환 텍스트</h2>
+      <div id="liveText" class="empty">녹음을 시작하면 여기에 텍스트가 쌓입니다</div>
+    </div>
+
+    <div class="card">
+      <h2>📁 녹음 파일 업로드</h2>
+      <p class="sub" style="margin-bottom:10px;">현장에서 폰 녹음기로 녹음했다면 파일을 올려서 변환하세요. (m4a, mp3, wav 등)</p>
+      <input type="file" id="audioFile" accept="audio/*" style="font-size:14px; color:var(--sub);">
+      <div style="margin-top:12px;">
+        <button class="primary" onclick="transcribeUpload()">파일 변환하기</button>
+      </div>
+    </div>
+
+    <div class="card" id="finishCard" style="display:none;">
+      <h2>✅ 포럼 종료 후 정리</h2>
+      <p class="sub" style="margin-bottom:12px;">변환된 텍스트를 내 일지 양식에 맞춰 자동 정리하고, 특이사항을 추출합니다.</p>
+      <button class="primary" onclick="generateReport()">일지 자동 생성</button>
+    </div>
+  </div>
+
+  <!-- ============ 출석부 ============ -->
+  <div class="page" id="page-attendance">
+    <div class="card">
+      <h2>📅 출석 체크</h2>
+      <input type="date" id="attDate" onchange="renderAttendance()">
+      <div id="attList" style="margin-top:10px;"></div>
+      <div class="row2">
+        <button class="ghost" onclick="openMemberModal()">팀원 관리</button>
+        <button class="ghost" onclick="markAllPresent()">전체 출석</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📊 출석 현황</h2>
+      <div id="attSummary" class="sub"></div>
+    </div>
+  </div>
+
+  <!-- ============ 포럼일지 ============ -->
+  <div class="page" id="page-logs">
+    <div class="card">
+      <h2>📖 포럼일지</h2>
+      <div id="logList"></div>
+      <div style="margin-top:12px;">
+        <button class="ghost" style="width:100%;" onclick="openLogEditor(null)">＋ 직접 작성</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 특이사항 ============ -->
+  <div class="page" id="page-notes">
+    <div class="card">
+      <h2>⚠️ 특이사항</h2>
+      <p class="sub" style="margin-bottom:8px;">기도제목, 심방 필요, 관심 필요한 팀원 등. 일지 생성 시 자동 추출되고 직접 추가할 수도 있습니다.</p>
+      <textarea id="newNote" placeholder="예: OO이 다음 주 시험이라 기도 요청" style="min-height:60px;"></textarea>
+      <div style="margin-top:8px;"><button class="primary" onclick="addNote()">추가</button></div>
+      <div id="noteList" style="margin-top:14px;"></div>
+    </div>
+  </div>
+
+  <!-- ============ 설정 ============ -->
+  <div class="page" id="page-settings">
+    <div class="card">
+      <h2>🔑 OpenAI API 키</h2>
+      <p class="sub" style="margin-bottom:8px;">키는 이 기기 브라우저에만 저장됩니다. 외부로 전송되지 않습니다(OpenAI 호출 제외).</p>
+      <input type="password" id="apiKey" placeholder="sk-...">
+      <label class="fld">포럼팀장 이름</label>
+      <input type="text" id="leaderName" placeholder="예: 성민근">
+      <div style="margin-top:10px;"><button class="primary" onclick="saveSettings()">저장</button></div>
+    </div>
+    <div class="card">
+      <h2>📋 포럼일지 양식</h2>
+      <p class="sub" style="margin-bottom:8px;">기존에 쓰던 일지 예시를 그대로 붙여넣으세요. AI가 이 형식 그대로 일지를 생성합니다.</p>
+      <textarea id="templateText" style="min-height:180px;" placeholder="기존 포럼일지 예시를 붙여넣기..."></textarea>
+      <div style="margin-top:10px;"><button class="primary" onclick="saveSettings()">저장</button></div>
+    </div>
+    <div class="card">
+      <h2>💾 데이터 백업</h2>
+      <div class="row2">
+        <button class="ghost" onclick="exportData()">내보내기 (JSON)</button>
+        <button class="ghost" onclick="document.getElementById('importFile').click()">가져오기</button>
+      </div>
+      <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importData(this)">
+    </div>
+  </div>
+</main>
+
+<nav>
+  <button class="active" data-page="forum" onclick="showPage('forum')"><span class="ico">🎙️</span>포럼</button>
+  <button data-page="attendance" onclick="showPage('attendance')"><span class="ico">📅</span>출석부</button>
+  <button data-page="logs" onclick="showPage('logs')"><span class="ico">📖</span>일지</button>
+  <button data-page="notes" onclick="showPage('notes')"><span class="ico">⚠️</span>특이사항</button>
+</nav>
+
+<!-- 팀원 관리 모달 -->
+<div class="modal-bg" id="memberModal">
+  <div class="modal">
+    <h3>팀원 관리</h3>
+    <div id="memberList"></div>
+    <div class="row2">
+      <input type="text" id="newMemberName" placeholder="이름">
+      <button class="ghost" style="flex:0 0 auto;" onclick="addMember()">추가</button>
+    </div>
+    <div style="margin-top:14px;"><button class="primary" onclick="closeModal('memberModal')">닫기</button></div>
+  </div>
+</div>
+
+<!-- 일지 편집 모달 -->
+<div class="modal-bg" id="logModal">
+  <div class="modal">
+    <h3 id="logModalTitle">포럼일지</h3>
+    <label class="fld">날짜</label>
+    <input type="date" id="logDate">
+    <label class="fld">내용</label>
+    <textarea id="logBody" style="min-height:280px;"></textarea>
+    <div class="row2">
+      <button class="ghost" onclick="copyLog()">📋 복사</button>
+      <button class="danger" onclick="deleteLog()">삭제</button>
+    </div>
+    <div class="row2">
+      <button class="primary" onclick="saveLog()">저장</button>
+      <button class="ghost" onclick="closeModal('logModal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 저장소 ================= */
+const store = {
+  get(k, def) { try { const v = localStorage.getItem('forum_'+k); return v ? JSON.parse(v) : def; } catch(e){ return def; } },
+  set(k, v) { localStorage.setItem('forum_'+k, JSON.stringify(v)); }
+};
+let members = store.get('members', []);          // [{id, name}]
+let attendance = store.get('attendance', {});     // { "2026-07-10": { memberId: "O"|"X"|"L" } }
+let logs = store.get('logs', []);                 // [{id, date, topic, body, createdAt}]
+let notes = store.get('notes', []);               // [{id, date, body}]
+const DEFAULT_TEMPLATE = `1부 : 생명의 떡, 만나로 오신 예수 그리스도를 대대로 기념하라
+2부 : 요나의 표적보다 더 크신 예수 그리스도를 바라보라
+
+포럼팀장 : OOO (주일 1부/2부/3부/수요예배/핵심)
+포럼팀원 : OOO (O/O), OOO (O/O)
+
+OOO
+지난 주 : 그리스도를 믿음, 생각, 체질에 적용하자고 말씀 붙잡고 진행. 안 되는 나를 보며 화가 났던 한 주
+
+이번 주 : 시선을 돌리는 무집중, 무감각을 꺾고 은혜의 리듬 타겠다
+
+OOO
+지난 주 : 내 안에 자존심으로 사는 것이 아닌 주존심으로 살았던 한 주
+
+이번 주 : 하나님을 보려고 하지 않고 하나님의 말씀을 내 안에 담겠다.`;
+let settings = store.get('settings', { apiKey:'', template: DEFAULT_TEMPLATE, leaderName:'' });
+if (!settings.template) settings.template = DEFAULT_TEMPLATE;
+
+const $ = id => document.getElementById(id);
+const today = () => new Date().toISOString().slice(0,10);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+/* ================= 네비게이션 ================= */
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  $('page-'+name).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active', b.dataset.page===name));
+  if (name==='attendance') renderAttendance();
+  if (name==='logs') renderLogs();
+  if (name==='notes') renderNotes();
+  if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; }
+}
+
+/* ================= 설정 ================= */
+function saveSettings() {
+  settings.apiKey = $('apiKey').value.trim();
+  settings.template = $('templateText').value;
+  settings.leaderName = $('leaderName').value.trim();
+  store.set('settings', settings);
+  toast('저장되었습니다');
+}
+function requireKey() {
+  if (!settings.apiKey) { toast('설정에서 OpenAI API 키를 먼저 입력하세요'); showPage('settings'); return false; }
+  return true;
+}
+
+/* ================= 출석부 ================= */
+function renderAttendance() {
+  if (!$('attDate').value) $('attDate').value = today();
+  const date = $('attDate').value;
+  const day = attendance[date] || {};
+  const list = $('attList');
+  if (!members.length) { list.innerHTML = '<div class="empty">팀원 관리에서 팀원을 추가하세요</div>'; renderAttSummary(); return; }
+  list.innerHTML = members.map(m => {
+    const s = day[m.id] || '';
+    return `<div class="member-row">
+      <div class="member-name">${m.name}</div>
+      <div class="att-btns">
+        <button class="att-btn ${s==='O'?'on-o':''}" onclick="setAtt('${m.id}','O')">출석</button>
+        <button class="att-btn ${s==='L'?'on-l':''}" onclick="setAtt('${m.id}','L')">지각</button>
+        <button class="att-btn ${s==='X'?'on-x':''}" onclick="setAtt('${m.id}','X')">결석</button>
+      </div>
+    </div>`;
+  }).join('');
+  renderAttSummary();
+}
+function setAtt(memberId, status) {
+  const date = $('attDate').value;
+  attendance[date] = attendance[date] || {};
+  attendance[date][memberId] = attendance[date][memberId] === status ? '' : status;
+  store.set('attendance', attendance);
+  renderAttendance();
+}
+function markAllPresent() {
+  const date = $('attDate').value;
+  attendance[date] = {};
+  members.forEach(m => attendance[date][m.id] = 'O');
+  store.set('attendance', attendance);
+  renderAttendance();
+}
+function renderAttSummary() {
+  const dates = Object.keys(attendance).sort().reverse().slice(0,8);
+  if (!dates.length || !members.length) { $('attSummary').innerHTML = '기록이 없습니다'; return; }
+  let html = '<div style="overflow-x:auto;"><table style="border-collapse:collapse; font-size:12px; width:100%;">';
+  html += '<tr><th style="text-align:left; padding:6px 8px 6px 0;">이름</th>' + dates.map(d=>`<th style="padding:6px 4px; color:var(--sub); font-weight:400;">${d.slice(5)}</th>`).join('') + '</tr>';
+  members.forEach(m => {
+    html += `<tr><td style="padding:6px 8px 6px 0; white-space:nowrap;">${m.name}</td>`;
+    dates.forEach(d => {
+      const s = (attendance[d]||{})[m.id] || '·';
+      const c = s==='O' ? 'var(--green)' : s==='X' ? 'var(--red)' : s==='L' ? 'var(--yellow)' : 'var(--sub)';
+      html += `<td style="text-align:center; padding:6px 4px; color:${c};">${s==='L'?'△':s}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table></div>';
+  $('attSummary').innerHTML = html;
+}
+function openMemberModal() { renderMembers(); $('memberModal').classList.add('open'); }
+function closeModal(id) { $(id).classList.remove('open'); if(id==='memberModal') renderAttendance(); }
+function renderMembers() {
+  $('memberList').innerHTML = members.map(m =>
+    `<div class="member-row"><div class="member-name">${m.name}</div>
+     <button class="danger" style="padding:6px 12px;" onclick="removeMember('${m.id}')">삭제</button></div>`
+  ).join('') || '<div class="empty">팀원이 없습니다</div>';
+}
+function addMember() {
+  const name = $('newMemberName').value.trim();
+  if (!name) return;
+  members.push({ id: uid(), name });
+  store.set('members', members);
+  $('newMemberName').value = '';
+  renderMembers();
+}
+function removeMember(id) {
+  members = members.filter(m=>m.id!==id);
+  store.set('members', members);
+  renderMembers();
+}
+
+/* ================= 녹음 & 실시간 변환 ================= */
+let recording = false;
+let mediaStream = null;
+let mediaRecorder = null;
+let recStartTime = 0;
+let timerInterval = null;
+let segmentTimer = null;
+let transcript = '';           // 누적 변환 텍스트
+let pendingJobs = 0;
+let wakeLock = null;
+const SEGMENT_MS = 60000;      // 60초마다 세그먼트 변환
+
+async function toggleRecording() {
+  if (recording) { await stopRecording(); } else { await startRecording(); }
+}
+
+async function startRecording() {
+  if (!requireKey()) return;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch(e) { toast('마이크 권한이 필요합니다'); return; }
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e){}
+
+  recording = true;
+  if (transcript && !confirm('이전 변환 텍스트가 있습니다. 이어서 녹음할까요? (취소 시 새로 시작)')) transcript = '';
+  if (!$('forumDate').value) $('forumDate').value = today();
+  store.set('sermons', { s1: $('sermon1').value, s2: $('sermon2').value });
+  recStartTime = Date.now();
+  $('recCircle').classList.add('recording');
+  $('recIco').textContent = '⏸';
+  $('recLabel').textContent = '탭하여 종료';
+  $('recStatus').textContent = '녹음 중';
+  $('recStatus').className = 'status-badge rec';
+  timerInterval = setInterval(updateTimer, 500);
+  startSegment();
+}
+
+function startSegment() {
+  if (!recording || !mediaStream) return;
+  const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' :
+               MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+  mediaRecorder = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  mediaRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    if (chunks.length) {
+      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      if (blob.size > 8000) transcribeSegment(blob); // 너무 작으면(무음) 스킵
+    }
+    if (recording) startSegment(); // 다음 세그먼트 (완전한 파일 헤더 확보 위해 재시작 방식)
+  };
+  mediaRecorder.start();
+  segmentTimer = setTimeout(() => { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); }, SEGMENT_MS);
+}
+
+async function stopRecording() {
+  recording = false;
+  clearTimeout(segmentTimer);
+  clearInterval(timerInterval);
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  mediaStream?.getTracks().forEach(t=>t.stop());
+  mediaStream = null;
+  try { await wakeLock?.release(); } catch(e){}
+  $('recCircle').classList.remove('recording');
+  $('recIco').textContent = '🎙️';
+  $('recLabel').textContent = '탭하여 녹음 시작';
+  $('recStatus').textContent = pendingJobs > 0 ? '변환 마무리 중...' : '대기 중';
+  $('recStatus').className = 'status-badge' + (pendingJobs>0 ? ' proc' : '');
+  checkFinishReady();
+}
+
+function updateTimer() {
+  const s = Math.floor((Date.now()-recStartTime)/1000);
+  $('recTimer').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+async function transcribeSegment(blob) {
+  pendingJobs++;
+  updateProcStatus();
+  try {
+    const text = await whisper(blob);
+    if (text.trim()) {
+      transcript += (transcript ? '\n' : '') + text.trim();
+      renderLiveText();
+    }
+  } catch(e) {
+    console.error(e);
+    toast('변환 오류: ' + e.message);
+  } finally {
+    pendingJobs--;
+    updateProcStatus();
+    checkFinishReady();
+  }
+}
+
+function updateProcStatus() {
+  if (recording) return;
+  const st = $('recStatus');
+  if (pendingJobs > 0) { st.textContent = '변환 중...'; st.className = 'status-badge proc'; }
+  else { st.textContent = '대기 중'; st.className = 'status-badge'; }
+}
+
+function renderLiveText() {
+  const el = $('liveText');
+  el.classList.remove('empty');
+  el.textContent = transcript;
+  el.scrollTop = el.scrollHeight;
+}
+
+function checkFinishReady() {
+  $('finishCard').style.display = (transcript.trim() && !recording) ? 'block' : 'none';
+}
+
+async function whisper(blob) {
+  const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('webm') ? 'webm' :
+              blob.type.includes('mpeg') ? 'mp3' : blob.type.includes('wav') ? 'wav' : 'm4a';
+  const fd = new FormData();
+  fd.append('file', blob, 'audio.' + ext);
+  fd.append('model', 'whisper-1');
+  fd.append('language', 'ko');
+  // 직전 문맥을 프롬프트로 넘겨 연속성 향상
+  if (transcript) fd.append('prompt', transcript.slice(-200));
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + settings.apiKey },
+    body: fd
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || 'API 오류 ' + res.status);
+  }
+  const data = await res.json();
+  return data.text || '';
+}
+
+/* 파일 업로드 변환 */
+async function transcribeUpload() {
+  if (!requireKey()) return;
+  const f = $('audioFile').files[0];
+  if (!f) { toast('파일을 선택하세요'); return; }
+  if (f.size > 25 * 1024 * 1024) { toast('25MB 이하 파일만 가능합니다 (OpenAI 제한)'); return; }
+  toast('변환 중... 파일 길이에 따라 몇 분 걸릴 수 있어요');
+  $('recStatus').textContent = '파일 변환 중...';
+  $('recStatus').className = 'status-badge proc';
+  try {
+    const text = await whisper(f);
+    transcript += (transcript ? '\n' : '') + text.trim();
+    renderLiveText();
+    if (!$('forumDate').value) $('forumDate').value = today();
+    toast('변환 완료!');
+  } catch(e) {
+    toast('변환 실패: ' + e.message);
+  }
+  $('recStatus').textContent = '대기 중';
+  $('recStatus').className = 'status-badge';
+  checkFinishReady();
+}
+
+/* ================= 일지 자동 생성 ================= */
+async function generateReport() {
+  if (!requireKey()) return;
+  if (!transcript.trim()) { toast('변환된 텍스트가 없습니다'); return; }
+  toast('일지 생성 중...');
+  const date = $('forumDate').value || today();
+  const s1 = $('sermon1').value.trim();
+  const s2 = $('sermon2').value.trim();
+  const topic = [s1,s2].filter(Boolean).join(' / ');
+  const leader = settings.leaderName || 'OOO';
+  const memberLine = members.map(m=>`${m.name} ( / )`).join(', ') || 'OOO ( / )';
+  const header = `1부 : ${s1 || 'OOO'}\n2부 : ${s2 || 'OOO'}\n\n포럼팀장 : ${leader} (주일 1부/2부/3부/수요예배/핵심)\n포럼팀원 : ${memberLine}`;
+
+  const sys = `너는 교회 청년부 포럼(소그룹 나눔모임) 팀장의 서기다. 포럼 녹음을 텍스트로 변환한 원문을 바탕으로 포럼일지를 작성한다.
+
+아래는 기존에 쓰던 포럼일지 양식 예시다. 형식·문체·어조를 그대로 따라라:
+---양식 예시 시작---
+${settings.template}
+---양식 예시 끝---
+
+작성 규칙:
+- 일지 맨 위 머리말은 내가 제공하는 [머리말]을 한 글자도 바꾸지 말고 그대로 출력하라. (출석 표기 ( / )도 빈칸 그대로 둘 것 — 팀장이 직접 체크한다)
+- 머리말 아래에 팀원별로 다음 형식으로 작성:
+
+이름
+지난 주 : (지난 주에 붙잡은 말씀/도전과 실제로 어떻게 지냈는지를 1~3문장으로 압축. "~했던 한 주" 같은 기존 문체 유지)
+
+이번 주 : (이번 주 도전/결단을 1~2문장으로. "~하겠다" 체로 마무리)
+
+- 팀원 사이는 빈 줄로 구분.
+- 원문에 없는 내용을 지어내지 말 것. 나눔이 없었던 팀원은 아예 생략.
+- 발언자가 원문에서 특정되면 그 이름을 쓰고, 불명확하면 문맥(제공된 팀원 명단)으로 추정하되 확신이 없으면 "미상"으로 표기.
+- 신앙 용어(주존심, 은혜의 리듬, 그리스도 이름, 신분 권세 등)는 발언자가 쓴 표현을 최대한 살려라.
+- 일지 본문이 끝난 뒤 반드시 아래 구분자와 함께 특이사항을 JSON 배열로 출력하라:
+===특이사항===
+["특이사항1", "특이사항2", ...]
+(특이사항: 기도제목, 심방/관심 필요, 다음 모임 공지, 팀원 근황 변화, 시험/취업/건강 등 개인 사정. 없으면 빈 배열 [])`;
+
+  const usr = `포럼 날짜: ${date}
+
+[머리말]
+${header}
+
+팀원 명단: ${members.map(m=>m.name).join(', ') || '(미등록)'}
+
+===녹음 변환 원문===
+${transcript}`;
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method:'POST',
+      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+settings.apiKey },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{role:'system', content:sys},{role:'user', content:usr}],
+        temperature: 0.3
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.error?.message || 'API 오류 '+res.status);
+    }
+    const data = await res.json();
+    const full = data.choices[0].message.content;
+
+    // 특이사항 분리
+    let body = full, extracted = [];
+    const idx = full.indexOf('===특이사항===');
+    if (idx !== -1) {
+      body = full.slice(0, idx).trim();
+      try {
+        const jsonMatch = full.slice(idx).match(/\[[\s\S]*\]/);
+        if (jsonMatch) extracted = JSON.parse(jsonMatch[0]);
+      } catch(e){}
+    }
+
+    // 일지 저장
+    const log = { id: uid(), date, topic, body, transcript, createdAt: Date.now() };
+    logs.unshift(log);
+    store.set('logs', logs);
+
+    // 특이사항 저장
+    extracted.forEach(t => notes.unshift({ id: uid(), date, body: t }));
+    store.set('notes', notes);
+
+    transcript = '';
+    renderLiveText();
+    $('liveText').classList.add('empty');
+    $('liveText').textContent = '녹음을 시작하면 여기에 텍스트가 쌓입니다';
+    checkFinishReady();
+    toast('일지 생성 완료!' + (extracted.length ? ` 특이사항 ${extracted.length}건 추출` : ''));
+    showPage('logs');
+    openLogEditor(log.id);
+  } catch(e) {
+    toast('생성 실패: ' + e.message);
+  }
+}
+
+/* ================= 포럼일지 ================= */
+let editingLogId = null;
+function renderLogs() {
+  $('logList').innerHTML = logs.map(l =>
+    `<div class="log-item" onclick="openLogEditor('${l.id}')">
+      <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''}</div>
+      <div class="p">${(l.body||'').slice(0,60).replace(/\n/g,' ')}</div>
+    </div>`
+  ).join('') || '<div class="empty">아직 일지가 없습니다</div>';
+}
+function openLogEditor(id) {
+  editingLogId = id;
+  if (id) {
+    const l = logs.find(x=>x.id===id);
+    $('logModalTitle').textContent = '포럼일지 · ' + l.date;
+    $('logDate').value = l.date;
+    $('logBody').value = l.body;
+  } else {
+    $('logModalTitle').textContent = '새 포럼일지';
+    $('logDate').value = today();
+    $('logBody').value = '';
+  }
+  $('logModal').classList.add('open');
+}
+function saveLog() {
+  const date = $('logDate').value, body = $('logBody').value;
+  if (editingLogId) {
+    const l = logs.find(x=>x.id===editingLogId);
+    l.date = date; l.body = body;
+  } else {
+    logs.unshift({ id: uid(), date, topic:'', body, createdAt: Date.now() });
+  }
+  store.set('logs', logs);
+  closeModal('logModal');
+  renderLogs();
+  toast('저장되었습니다');
+}
+function deleteLog() {
+  if (!editingLogId || !confirm('이 일지를 삭제할까요?')) return;
+  logs = logs.filter(l=>l.id!==editingLogId);
+  store.set('logs', logs);
+  closeModal('logModal');
+  renderLogs();
+}
+function copyLog() {
+  navigator.clipboard.writeText($('logBody').value).then(()=>toast('복사되었습니다'));
+}
+
+/* ================= 특이사항 ================= */
+function renderNotes() {
+  $('noteList').innerHTML = notes.map(n =>
+    `<div class="note-item">
+      <div class="d">${n.date} <button class="danger" style="float:right; padding:3px 10px; font-size:12px;" onclick="removeNote('${n.id}')">삭제</button></div>
+      <div class="b">${n.body}</div>
+    </div>`
+  ).join('') || '<div class="empty">특이사항이 없습니다</div>';
+}
+function addNote() {
+  const body = $('newNote').value.trim();
+  if (!body) return;
+  notes.unshift({ id: uid(), date: today(), body });
+  store.set('notes', notes);
+  $('newNote').value = '';
+  renderNotes();
+}
+function removeNote(id) {
+  notes = notes.filter(n=>n.id!==id);
+  store.set('notes', notes);
+  renderNotes();
+}
+
+/* ================= 백업 ================= */
+function exportData() {
+  const data = { members, attendance, logs, notes, settings: { template: settings.template }, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `포럼팀장_백업_${today()}.json`;
+  a.click();
+}
+function importData(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const d = JSON.parse(reader.result);
+      if (d.members) { members = d.members; store.set('members', members); }
+      if (d.attendance) { attendance = d.attendance; store.set('attendance', attendance); }
+      if (d.logs) { logs = d.logs; store.set('logs', logs); }
+      if (d.notes) { notes = d.notes; store.set('notes', notes); }
+      if (d.settings?.template) { settings.template = d.settings.template; store.set('settings', settings); }
+      toast('가져오기 완료');
+      renderAttendance(); renderLogs(); renderNotes();
+    } catch(e) { toast('파일 형식 오류'); }
+  };
+  reader.readAsText(f);
+}
+
+/* ================= 초기화 ================= */
+$('forumDate').value = today();
+const savedSermons = store.get('sermons', {});
+if (savedSermons.s1) $('sermon1').value = savedSermons.s1;
+if (savedSermons.s2) $('sermon2').value = savedSermons.s2;
+$('sermon1').addEventListener('change', ()=>store.set('sermons', { s1:$('sermon1').value, s2:$('sermon2').value }));
+$('sermon2').addEventListener('change', ()=>store.set('sermons', { s1:$('sermon1').value, s2:$('sermon2').value }));
+window.addEventListener('beforeunload', e => {
+  if (recording || transcript.trim()) { e.preventDefault(); e.returnValue = ''; }
+});
+</script>
+</body>
+</html>
