@@ -378,7 +378,8 @@ let settings = store.get('settings', { apiKey:'', template: DEFAULT_TEMPLATE, le
 if (!settings.template) settings.template = DEFAULT_TEMPLATE;
 
 const $ = id => document.getElementById(id);
-const today = () => new Date().toISOString().slice(0,10);
+const fmtDate = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+const today = () => fmtDate(new Date());
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -484,7 +485,7 @@ async function verifyKey() {
 function sundayOf(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - d.getDay());
-  return d.toISOString().slice(0,10);
+  return fmtDate(d);
 }
 function getAtt(date, memberId) {
   const v = (attendance[date]||{})[memberId];
@@ -545,7 +546,7 @@ function renderAttSummary() {
   const d = new Date(y, m-1, 1);
   d.setDate(d.getDate() + (7 - d.getDay()) % 7); // 첫 일요일
   while (d.getMonth() === m-1) {
-    dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+    dates.push(fmtDate(d));
     d.setDate(d.getDate() + 7);
   }
   if (!members.length) { $('attSummary').innerHTML = '팀원을 먼저 등록하세요'; return; }
@@ -1044,6 +1045,15 @@ function importData(input) {
     } catch(e) { toast('파일 형식 오류'); }
   };
   reader.readAsText(f);
+}
+
+/* ================= 카카오톡 내장 브라우저 감지 ================= */
+if (/KAKAOTALK/i.test(navigator.userAgent)) {
+  const warn = document.createElement('div');
+  warn.style.cssText = 'background:#3a3220; color:var(--yellow); padding:14px 16px; font-size:13px; line-height:1.5; border-bottom:1px solid var(--border);';
+  warn.innerHTML = `⚠️ <b>카카오톡 브라우저로 접속 중입니다.</b><br>여기서는 녹음·공유·데이터 저장이 제대로 동작하지 않습니다. 아래 버튼으로 크롬/사파리에서 열고, 홈 화면에 추가해서 사용하세요.<br>
+  <button style="margin-top:10px; background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600;" onclick="location.href='kakaotalk://web/openExternal?url='+encodeURIComponent(location.href)">기본 브라우저로 열기</button>`;
+  document.body.insertBefore(warn, document.body.firstChild);
 }
 
 /* ================= 초기화 ================= */
