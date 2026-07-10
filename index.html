@@ -149,6 +149,22 @@
   }
   .toast.show { opacity:1; }
   .empty { text-align:center; color:var(--sub); font-size:14px; padding: 24px 0; }
+  .dots-btn {
+    background:none; border:none; color:var(--sub); font-size:20px; cursor:pointer;
+    padding: 6px 10px; border-radius:8px; flex:0 0 auto;
+  }
+  .dots-btn:active { background: var(--card2); }
+  .ctx-menu {
+    position: fixed; z-index: 60; background: var(--card2);
+    border:1px solid var(--border); border-radius: 12px; overflow:hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); min-width: 140px;
+  }
+  .ctx-menu button {
+    display:block; width:100%; background:none; border:none; color:var(--text);
+    padding: 12px 16px; font-size:14px; text-align:left; cursor:pointer;
+  }
+  .ctx-menu button:active { background: var(--card); }
+  .ctx-menu button.del { color: var(--red); }
   .chip { font-size:12px; color:var(--sub); background:var(--card2); padding:4px 10px; border-radius:14px; }
   pre.report { white-space:pre-wrap; font-family:inherit; font-size:14px; line-height:1.65; }
 </style>
@@ -216,7 +232,14 @@
       </div>
     </div>
     <div class="card">
-      <h2>📊 출석 현황</h2>
+      <h2 style="display:flex; align-items:center; justify-content:space-between;">
+        <span>📊 출석 현황</span>
+        <span style="display:flex; align-items:center; gap:4px;">
+          <button class="dots-btn" style="font-size:16px;" onclick="moveAttMonth(-1)">◀</button>
+          <span id="attMonthLabel" style="font-size:14px; min-width:76px; text-align:center;"></span>
+          <button class="dots-btn" style="font-size:16px;" onclick="moveAttMonth(1)">▶</button>
+        </span>
+      </h2>
       <div id="attSummary" class="sub"></div>
     </div>
   </div>
@@ -457,6 +480,12 @@ async function verifyKey() {
 
 
 /* ================= 출석부 ================= */
+/* 해당 날짜가 속한 주의 주일(일요일) 날짜 반환 */
+function sundayOf(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() - d.getDay());
+  return d.toISOString().slice(0,10);
+}
 function getAtt(date, memberId) {
   const v = (attendance[date]||{})[memberId];
   // 구버전 데이터('O'/'X'/'L' 문자열) 호환
@@ -464,7 +493,12 @@ function getAtt(date, memberId) {
   return v || null;
 }
 function renderAttendance() {
-  if (!$('attDate').value) $('attDate').value = today();
+  if (!$('attDate').value) $('attDate').value = sundayOf(today());
+  // 출석은 주일 기준 — 다른 요일을 고르면 그 주의 주일로 맞춤
+  if ($('attDate').value !== sundayOf($('attDate').value)) {
+    $('attDate').value = sundayOf($('attDate').value);
+    toast('출석은 주일 기준으로 기록됩니다');
+  }
   const date = $('attDate').value;
   const list = $('attList');
   if (!members.length) { list.innerHTML = '<div class="empty">팀원 관리에서 팀원을 추가하세요</div>'; renderAttSummary(); return; }
@@ -496,12 +530,28 @@ function markAllPresent() {
   store.set('attendance', attendance);
   renderAttendance();
 }
+let attMonth = today().slice(0,7); // 'YYYY-MM'
+function moveAttMonth(delta) {
+  const [y, m] = attMonth.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  attMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  renderAttSummary();
+}
 function renderAttSummary() {
-  const dates = Object.keys(attendance).sort().reverse().slice(0,6);
-  if (!dates.length || !members.length) { $('attSummary').innerHTML = '기록이 없습니다'; return; }
+  const [y, m] = attMonth.split('-').map(Number);
+  $('attMonthLabel').textContent = `${y}년 ${m}월`;
+  // 해당 월의 모든 주일(일요일) 날짜
+  const dates = [];
+  const d = new Date(y, m-1, 1);
+  d.setDate(d.getDate() + (7 - d.getDay()) % 7); // 첫 일요일
+  while (d.getMonth() === m-1) {
+    dates.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'));
+    d.setDate(d.getDate() + 7);
+  }
+  if (!members.length) { $('attSummary').innerHTML = '팀원을 먼저 등록하세요'; return; }
   let html = '<p class="sub" style="margin-bottom:6px;">표기: 1부/2부 (O=출석, X=결석)</p>';
   html += '<div style="overflow-x:auto;"><table style="border-collapse:collapse; font-size:12px; width:100%;">';
-  html += '<tr><th style="text-align:left; padding:6px 8px 6px 0;">이름</th>' + dates.map(d=>`<th style="padding:6px 4px; color:var(--sub); font-weight:400;">${d.slice(5)}</th>`).join('') + '</tr>';
+  html += '<tr><th style="text-align:left; padding:6px 8px 6px 0;">이름</th>' + dates.map(dd=>`<th style="padding:6px 4px; color:var(--sub); font-weight:400;">${parseInt(dd.slice(8))}일</th>`).join('') + '</tr>';
   members.forEach(m => {
     html += `<tr><td style="padding:6px 8px 6px 0; white-space:nowrap;">${m.name}</td>`;
     dates.forEach(d => {
@@ -751,8 +801,9 @@ async function generateReport() {
   const s2 = $('sermon2').value.trim();
   const topic = [s1,s2].filter(Boolean).join(' / ');
   const leader = settings.leaderName || 'OOO';
+  const attDate = sundayOf(date); // 포럼이 평일이어도 그 주 주일 출석을 반영
   const memberLine = members.map(m => {
-    const a = getAtt(date, m.id);
+    const a = getAtt(attDate, m.id);
     return a ? `${m.name} (${a.p1?'O':'X'}/${a.p2?'O':'X'})` : `${m.name} ( / )`;
   }).join(', ') || 'OOO ( / )';
   const header = `1부 : ${s1 || 'OOO'}\n2부 : ${s2 || 'OOO'}\n\n포럼팀장 : ${leader} (주일 1부/2부/3부/수요예배/핵심)\n포럼팀원 : ${memberLine}`;
@@ -846,11 +897,54 @@ ${transcript}`;
 let editingLogId = null;
 function renderLogs() {
   $('logList').innerHTML = logs.map(l =>
-    `<div class="log-item" onclick="openLogEditor('${l.id}')">
-      <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''}</div>
-      <div class="p">${(l.body||'').slice(0,60).replace(/\n/g,' ')}</div>
+    `<div class="log-item" style="display:flex; align-items:center; gap:4px;">
+      <div style="flex:1; min-width:0;" onclick="openLogEditor('${l.id}')">
+        <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''}</div>
+        <div class="p">${(l.body||'').slice(0,60).replace(/\n/g,' ')}</div>
+      </div>
+      <button class="dots-btn" onclick="showLogMenu(event, '${l.id}')">⋮</button>
     </div>`
   ).join('') || '<div class="empty">아직 일지가 없습니다</div>';
+}
+function closeCtxMenu() { document.querySelector('.ctx-menu')?.remove(); }
+function showLogMenu(ev, id) {
+  ev.stopPropagation();
+  closeCtxMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.innerHTML = `
+    <button onclick="closeCtxMenu(); openLogEditor('${id}')">✏️ 수정</button>
+    <button onclick="closeCtxMenu(); quickShareLog('${id}')">💬 카톡 공유</button>
+    <button onclick="closeCtxMenu(); quickCopyLog('${id}')">📋 복사</button>
+    <button class="del" onclick="closeCtxMenu(); quickDeleteLog('${id}')">🗑 삭제</button>`;
+  document.body.appendChild(menu);
+  const r = ev.currentTarget.getBoundingClientRect();
+  const mw = 150;
+  menu.style.left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8)) + 'px';
+  const mh = menu.offsetHeight;
+  menu.style.top = (r.bottom + mh > window.innerHeight - 8 ? r.top - mh - 4 : r.bottom + 4) + 'px';
+  setTimeout(()=>document.addEventListener('click', closeCtxMenu, { once:true }), 0);
+}
+function quickDeleteLog(id) {
+  const l = logs.find(x=>x.id===id);
+  if (!l || !confirm(`${l.date} 일지를 삭제할까요?`)) return;
+  logs = logs.filter(x=>x.id!==id);
+  store.set('logs', logs);
+  renderLogs();
+  toast('삭제되었습니다');
+}
+async function quickShareLog(id) {
+  const l = logs.find(x=>x.id===id);
+  if (!l) return;
+  if (navigator.share) {
+    try { await navigator.share({ title: '포럼일지 ' + l.date, text: l.body }); } catch(e){}
+  } else {
+    navigator.clipboard.writeText(l.body).then(()=>toast('이 브라우저는 공유 미지원 — 대신 복사했습니다'));
+  }
+}
+function quickCopyLog(id) {
+  const l = logs.find(x=>x.id===id);
+  if (l) navigator.clipboard.writeText(l.body).then(()=>toast('복사되었습니다'));
 }
 function openLogEditor(id) {
   editingLogId = id;
