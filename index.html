@@ -203,6 +203,10 @@
       <h2>🗣 포럼 순서</h2>
       <p class="sub" style="margin-bottom:8px;">나눔 순서대로 정렬하세요 (▲▼). 녹음 중 발언자가 바뀔 때 <b>다음 사람</b>을 탭하면 텍스트가 사람별로 자동 구분됩니다.</p>
       <div id="orderList"></div>
+      <div class="row2">
+        <input type="text" id="newGuestName" placeholder="게스트 이름 (일지 미기재)">
+        <button class="ghost" style="flex:0 0 auto;" onclick="addGuest()">추가</button>
+      </div>
       <div id="speakerNow" style="display:none; text-align:center; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
         <div class="sub">지금 나누는 사람</div>
         <div id="speakerName" style="font-size:22px; font-weight:700; margin:6px 0 10px; color:var(--accent);"></div>
@@ -354,6 +358,9 @@
     <label class="fld">내용</label>
     <textarea id="logBody" style="min-height:280px;"></textarea>
     <div class="row2">
+      <button class="ghost" onclick="refreshLogAttendance()">🔄 출석 다시 반영</button>
+    </div>
+    <div class="row2">
       <button class="ghost" onclick="shareLog()">💬 카톡 공유</button>
       <button class="ghost" onclick="copyLog()">📋 복사</button>
       <button class="danger" onclick="deleteLog()">삭제</button>
@@ -436,6 +443,7 @@ function saveSettings() {
   settings.model = $('modelSelect').value || 'gpt-4o';
   settings.sttModel = $('sttModelSelect').value || 'whisper-1';
   store.set('settings', settings);
+  renderOrderList(); // 팀장 이름 변경을 포럼 순서에 즉시 반영
   toast('저장되었습니다');
 }
 function requireKey() {
@@ -624,30 +632,51 @@ function removeMember(id) {
 
 /* ================= 녹음 & 실시간 변환 ================= */
 /* ---- 포럼 순서 & 발언자 추적 ---- */
-let speakerOrder = store.get('speakerOrder', []); // 팀원 id 배열
+let speakerOrder = store.get('speakerOrder', []); // 참여자 id 배열
+let guests = store.get('guests', []);             // [{id, name}] 타팀 게스트 (일지 미기재)
 let currentIdx = 0;
 let speakerLog = []; // [{name, text}] 발언자별 변환 기록
 
-function orderedMembers() {
-  const byId = Object.fromEntries(members.map(m=>[m.id, m]));
+/* 포럼 참여자 = 팀장 + 팀원 + 게스트 (순서 적용) */
+function participants() {
+  const all = [
+    { id: 'LEADER', name: settings.leaderName || '팀장', type: 'leader' },
+    ...members.map(m => ({ ...m, type: 'member' })),
+    ...guests.map(g => ({ ...g, type: 'guest' }))
+  ];
+  const byId = Object.fromEntries(all.map(p=>[p.id, p]));
   const ordered = speakerOrder.filter(id=>byId[id]).map(id=>byId[id]);
-  members.forEach(m => { if (!ordered.includes(m)) ordered.push(m); });
+  all.forEach(p => { if (!ordered.some(o=>o.id===p.id)) ordered.push(p); });
   return ordered;
 }
+function orderedMembers() { return participants().filter(p=>p.type==='member'); }
+function addGuest() {
+  const name = $('newGuestName').value.trim();
+  if (!name) return;
+  guests.push({ id: uid(), name });
+  store.set('guests', guests);
+  $('newGuestName').value = '';
+  renderOrderList();
+}
+function removeGuest(id) {
+  guests = guests.filter(g=>g.id!==id);
+  store.set('guests', guests);
+  renderOrderList();
+}
 function renderOrderList() {
-  const om = orderedMembers();
-  $('orderList').innerHTML = om.map((m, i) =>
+  $('orderList').innerHTML = participants().map((p, i) =>
     `<div class="member-row">
-      <div class="member-name"><span class="sub">${i+1}.</span> ${m.name}</div>
+      <div class="member-name"><span class="sub">${i+1}.</span> ${p.name} ${p.type==='leader' ? '<span class="chip">팀장</span>' : p.type==='guest' ? '<span class="chip">게스트 · 일지 미기재</span>' : ''}</div>
       <div class="att-btns">
-        <button class="att-btn" onclick="moveOrder('${m.id}',-1)">▲</button>
-        <button class="att-btn" onclick="moveOrder('${m.id}',1)">▼</button>
+        <button class="att-btn" onclick="moveOrder('${p.id}',-1)">▲</button>
+        <button class="att-btn" onclick="moveOrder('${p.id}',1)">▼</button>
+        ${p.type==='guest' ? `<button class="att-btn" onclick="removeGuest('${p.id}')">✕</button>` : ''}
       </div>
     </div>`
-  ).join('') || '<div class="empty">출석부에서 팀원을 등록하면 여기에 나타납니다</div>';
+  ).join('');
 }
 function moveOrder(id, dir) {
-  const ids = orderedMembers().map(m=>m.id);
+  const ids = participants().map(p=>p.id);
   const i = ids.indexOf(id), j = i + dir;
   if (j < 0 || j >= ids.length) return;
   [ids[i], ids[j]] = [ids[j], ids[i]];
@@ -656,11 +685,11 @@ function moveOrder(id, dir) {
   renderOrderList();
 }
 function currentSpeakerName() {
-  const om = orderedMembers();
+  const om = participants();
   return om.length ? om[currentIdx % om.length].name : '';
 }
 function updateSpeakerUI() {
-  const show = recording && orderedMembers().length > 0;
+  const show = recording && participants().length > 0;
   $('speakerNow').style.display = show ? 'block' : 'none';
   if (show) $('speakerName').textContent = currentSpeakerName();
 }
@@ -836,7 +865,14 @@ async function parseBulletin(input) {
         messages: [{
           role: 'user',
           content: [
-            { type: 'text', text: '이것은 교회 주보 이미지다. 주일 1부 예배와 2부 예배의 말씀(설교) 제목을 찾아서 JSON으로만 답하라. 형식: {"s1":"1부 말씀 제목","s2":"2부 말씀 제목"} 부제나 성경 구절 표기가 제목에 붙어 있으면 제목 본문만 넣어라. 못 찾은 항목은 빈 문자열로.' },
+            { type: 'text', text: `이것은 교회 주보 이미지다. "말씀" 순서(설교 제목) 항목에서 1부와 2부의 말씀 제목을 찾아라.
+규칙:
+- 제목은 보통 따옴표(" ") 안에 문장 형태로 길게 적혀 있다. 따옴표 안의 문장 전체를 요약·축약·수정 없이 한 글자도 바꾸지 말고 그대로 옮겨 적어라. (따옴표 자체는 제외)
+- 절대 요약하지 마라. 제목이 길어도 전문을 그대로 쓴다.
+- "1부)" "2부)" 표기 뒤의 문장이 각각의 제목이다.
+- 찬양 제목, 성경봉독 구절, 기도문과 혼동하지 마라.
+- 못 찾은 항목은 빈 문자열로.
+JSON으로만 답하라. 형식: {"s1":"1부 말씀 제목 전문","s2":"2부 말씀 제목 전문"}` },
             { type: 'image_url', image_url: { url: dataUrl } }
           ]
         }],
@@ -928,9 +964,12 @@ function generateFreeReport() {
   if (!speakerLog.length) { toast('발언자별 기록이 없습니다. 녹음 중 "다음 사람" 버튼으로 구분해야 무료 정리가 가능합니다'); return; }
   const date = $('forumDate').value || today();
   const { header, topic } = buildHeader(date);
+  // 게스트 나눔은 일지에서 제외
+  const guestNames = new Set(guests.map(g=>g.name));
+  const filtered = speakerLog.filter(s => !guestNames.has(s.name));
   // 연속된 같은 발언자 병합
   const merged = [];
-  speakerLog.forEach(s => {
+  filtered.forEach(s => {
     const last = merged[merged.length-1];
     if (last && last.name === s.name) last.text += ' ' + s.text;
     else merged.push({ name: s.name, text: s.text });
@@ -940,8 +979,8 @@ function generateFreeReport() {
     // "이번 주" 언급 지점을 기준으로 지난 주/이번 주 분리 (휴리스틱)
     const idx = t.indexOf('이번 주');
     if (idx > 20) {
-      const last = t.slice(0, idx).trim();
-      const next = t.slice(idx).replace(/^이번 주[는에도]?\s*[:：]?\s*/, '').trim();
+      const last = t.slice(0, idx).trim().replace(/(그래서요|그래서|그리고|그러니까|그런데|그럼)\s*$/, '').trim();
+      const next = t.slice(idx).replace(/^이번 주(에는|에도|부터는|부터|에|는|도)?\s*[:：,]?\s*/, '').trim();
       return `${s.name || '미상'}\n지난 주 : ${last}\n\n이번 주 : ${next}`;
     }
     return `${s.name || '미상'}\n지난 주 : ${t}\n\n이번 주 : `;
@@ -968,13 +1007,22 @@ ${settings.template}
 - 머리말 아래에 팀원별로 다음 형식으로 작성:
 
 이름
-지난 주 : (지난 주에 붙잡은 말씀/도전과 실제로 어떻게 지냈는지를 1~3문장으로 압축. "~했던 한 주" 같은 기존 문체 유지)
+지난 주 : (지난 주에 붙잡은 말씀/도전과 실제로 어떻게 지냈는지)
 
-이번 주 : (이번 주 도전/결단을 1~2문장으로. "~하겠다" 체로 마무리)
+이번 주 : (이번 주 도전/결단)
+
+문체 규칙 (반드시 지켜라):
+- 존댓말("~했는데요", "~합니다")과 군더더기("정말", "막상", "자꾸" 같은 강조어, "그래서" 같은 접속사)를 전부 제거하고 개조식으로 압축하라.
+- 지난 주 : 붙잡은 말씀은 "~하자고 말씀 붙잡고 진행." 형태로 먼저 쓰고, 이어서 실제 삶을 "~했던 한 주"로 끝맺어라. (예: "그리스도를 믿음, 생각, 체질에 적용하자고 말씀 붙잡고 진행. 안 되는 나를 보며 화가 났던 한 주")
+- 이번 주 : 결단을 한 문장으로 압축하고 "~겠다"로 끝맺어라. (예: "시선을 돌리는 무집중, 무감각을 꺾고 은혜의 리듬 타겠다")
+- 발언자가 쓴 핵심 신앙 표현(주존심, 은혜의 리듬, 의심병, 조급병, 신분 권세 등)은 그대로 살리되, 문장은 최대한 짧게 깎아라.
+- 지난 주 2문장 이내, 이번 주 1문장. 길게 늘어놓지 마라.
 
 - 팀원 사이는 빈 줄로 구분.
 - 팀원별 나눔의 배치 순서는 제공된 팀원 명단 순서를 그대로 따르라.
 - 원문에 없는 내용을 지어내지 말 것. 나눔이 없었던 팀원은 아예 생략.
+- 게스트 명단에 있는 사람의 나눔은 일지에 절대 포함하지 마라 (타 팀 소속이라 이 일지에 기재하지 않는다).
+- 포럼팀장 본인의 나눔은 팀원과 같은 형식으로 포함하라.
 - 발언자가 원문에서 특정되면 그 이름을 쓰고, 불명확하면 문맥(제공된 팀원 명단)으로 추정하되 확신이 없으면 "미상"으로 표기.
 - 신앙 용어(주존심, 은혜의 리듬, 그리스도 이름, 신분 권세 등)는 발언자가 쓴 표현을 최대한 살려라.
 - 일지 본문이 끝난 뒤 반드시 아래 구분자와 함께 특이사항을 JSON 배열로 출력하라:
@@ -987,7 +1035,8 @@ ${settings.template}
 [머리말]
 ${header}
 
-팀원 명단(나눔 순서대로): ${orderedMembers().map(m=>m.name).join(', ') || '(미등록)'}
+참여자 명단(나눔 순서대로): ${participants().map(p=>p.name + (p.type==='leader'?'(팀장)':p.type==='guest'?'(게스트)':'')).join(', ')}
+게스트 명단(일지 미기재): ${guests.map(g=>g.name).join(', ') || '(없음)'}
 
 ===녹음 변환 원문===
 ${transcript}`;
@@ -1123,6 +1172,22 @@ async function shareLog() {
   } else {
     navigator.clipboard.writeText(text).then(()=>toast('이 브라우저는 공유 미지원 — 대신 복사했습니다. 카톡에 붙여넣으세요'));
   }
+}
+/* 현재 출석 기록으로 일지의 팀장/팀원 줄을 다시 채움 (API 미사용) */
+function refreshLogAttendance() {
+  const date = $('logDate').value;
+  if (!date) { toast('날짜를 먼저 입력하세요'); return; }
+  const { header } = buildHeader(date);
+  const leaderLine = header.split('\n').find(l=>l.startsWith('포럼팀장 :'));
+  const memberLine = header.split('\n').find(l=>l.startsWith('포럼팀원 :'));
+  let body = $('logBody').value;
+  const hadLeader = /^포럼팀장 :.*$/m.test(body);
+  const hadMember = /^포럼팀원 :.*$/m.test(body);
+  if (!hadLeader && !hadMember) { toast('일지에서 팀장/팀원 줄을 찾지 못했습니다'); return; }
+  if (hadLeader && leaderLine) body = body.replace(/^포럼팀장 :.*$/m, leaderLine);
+  if (hadMember && memberLine) body = body.replace(/^포럼팀원 :.*$/m, memberLine);
+  $('logBody').value = body;
+  toast('출석 정보를 다시 반영했습니다. 저장을 눌러주세요');
 }
 function copyLog() {
   navigator.clipboard.writeText($('logBody').value).then(()=>toast('복사되었습니다'));
