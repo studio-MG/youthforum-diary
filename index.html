@@ -145,7 +145,7 @@
     position:fixed; bottom: 90px; left:50%; transform:translateX(-50%);
     background:#333350; color:#fff; padding:10px 20px; border-radius:24px;
     font-size:14px; z-index:100; opacity:0; transition:opacity .3s; pointer-events:none;
-    white-space:nowrap;
+    white-space:pre-wrap; max-width:86vw; text-align:center; line-height:1.45;
   }
   .toast.show { opacity:1; }
   .empty { text-align:center; color:var(--sub); font-size:14px; padding: 24px 0; }
@@ -408,9 +408,12 @@ const $ = id => document.getElementById(id);
 const fmtDate = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const today = () => fmtDate(new Date());
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+let toastTimer = null;
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2200);
+  clearTimeout(toastTimer);
+  // 긴 메시지(오류 등)는 읽을 시간을 충분히 줌
+  toastTimer = setTimeout(()=>t.classList.remove('show'), Math.min(8000, 2200 + msg.length * 40));
 }
 
 /* ================= 네비게이션 ================= */
@@ -450,6 +453,32 @@ function requireKey() {
   if (!settings.apiKey) { toast('설정에서 OpenAI API 키를 먼저 입력하세요'); showPage('settings'); return false; }
   return true;
 }
+/* LLM 호출 공통 — v1/responses 사용 (구형·최신 모델 모두 지원) */
+async function callLLM(sys, userContent) {
+  const res = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', Authorization:'Bearer '+settings.apiKey },
+    body: JSON.stringify({
+      model: settings.model || 'gpt-4o',
+      instructions: sys,
+      input: typeof userContent === 'string'
+        ? userContent
+        : [{ role:'user', content: userContent }]
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || 'API 오류 ' + res.status);
+  }
+  const data = await res.json();
+  return (data.output || [])
+    .filter(o => o.type === 'message')
+    .flatMap(m => m.content || [])
+    .filter(c => c.type === 'output_text')
+    .map(c => c.text)
+    .join('');
+}
+
 /* API 키 검증 & 모델 목록 */
 function disconnectKey() {
   if (!settings.apiKey && !$('apiKey').value) { toast('연결된 키가 없습니다'); return; }
@@ -897,35 +926,23 @@ async function parseBulletin(input) {
       r.onerror = reject;
       r.readAsDataURL(f);
     });
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+settings.apiKey },
-      body: JSON.stringify({
-        model: settings.model || 'gpt-4o',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: `이것은 교회 주보 이미지다. "말씀" 순서(설교 제목) 항목에서 1부와 2부의 말씀 제목을 찾아라.
+    const raw = await callLLM(
+      `이것은 교회 주보 이미지다. "말씀" 순서(설교 제목) 항목에서 1부와 2부의 말씀 제목을 찾아라.
 규칙:
 - 제목은 보통 따옴표(" ") 안에 문장 형태로 길게 적혀 있다. 따옴표 안의 문장 전체를 요약·축약·수정 없이 한 글자도 바꾸지 말고 그대로 옮겨 적어라. (따옴표 자체는 제외)
 - 절대 요약하지 마라. 제목이 길어도 전문을 그대로 쓴다.
 - "1부)" "2부)" 표기 뒤의 문장이 각각의 제목이다.
 - 찬양 제목, 성경봉독 구절, 기도문과 혼동하지 마라.
 - 못 찾은 항목은 빈 문자열로.
-JSON으로만 답하라. 형식: {"s1":"1부 말씀 제목 전문","s2":"2부 말씀 제목 전문"}` },
-            { type: 'image_url', image_url: { url: dataUrl } }
-          ]
-        }],
-        temperature: 0,
-        response_format: { type: 'json_object' }
-      })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(()=>({}));
-      throw new Error(err.error?.message || 'API 오류 '+res.status);
-    }
-    const data = await res.json();
-    const parsed = JSON.parse(data.choices[0].message.content);
+JSON으로만 답하라. 형식: {"s1":"1부 말씀 제목 전문","s2":"2부 말씀 제목 전문"}`,
+      [
+        { type: 'input_text', text: '주보 이미지에서 1부/2부 말씀 제목을 추출하라.' },
+        { type: 'input_image', image_url: dataUrl }
+      ]
+    );
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('응답에서 제목을 해석하지 못했습니다');
+    const parsed = JSON.parse(jsonMatch[0]);
     if (!parsed.s1 && !parsed.s2) { toast('주보에서 말씀 제목을 찾지 못했습니다'); return; }
     if (parsed.s1) $('sermon1').value = parsed.s1;
     if (parsed.s2) $('sermon2').value = parsed.s2;
@@ -1084,21 +1101,7 @@ ${header}
 ${transcript}`;
 
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method:'POST',
-      headers: { 'Content-Type':'application/json', Authorization:'Bearer '+settings.apiKey },
-      body: JSON.stringify({
-        model: settings.model || 'gpt-4o',
-        messages: [{role:'system', content:sys},{role:'user', content:usr}],
-        temperature: 0.3
-      })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(()=>({}));
-      throw new Error(err.error?.message || 'API 오류 '+res.status);
-    }
-    const data = await res.json();
-    const full = data.choices[0].message.content;
+    const full = await callLLM(sys, usr);
 
     // 특이사항 분리
     let body = full, extracted = [];
