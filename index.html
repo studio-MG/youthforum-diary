@@ -835,14 +835,37 @@ function checkFinishReady() {
 }
 
 async function whisper(blob) {
-  const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('webm') ? 'webm' :
-              blob.type.includes('mpeg') ? 'mp3' : blob.type.includes('wav') ? 'wav' : 'm4a';
+  const SUPPORTED = ['flac','m4a','mp3','mp4','mpeg','mpga','oga','ogg','wav','webm'];
+  let ext = '';
+  // 1순위: 업로드 파일의 실제 확장자
+  if (blob.name) {
+    const m = blob.name.toLowerCase().match(/\.([a-z0-9]+)$/);
+    if (m) {
+      if (SUPPORTED.includes(m[1])) ext = m[1];
+      else if (m[1] === '3ga' || m[1] === 'aac' || m[1] === 'amr' || m[1] === '3gp')
+        throw new Error(`.${m[1]} 형식은 OpenAI가 지원하지 않습니다. 폰 녹음기 설정에서 m4a(또는 mp3)로 바꾸거나 파일을 변환 후 올려주세요`);
+    }
+  }
+  // 2순위: 브라우저가 알려주는 타입 (녹음 blob 등)
+  if (!ext) {
+    const t = blob.type || '';
+    ext = t.includes('webm') ? 'webm' : t.includes('mp4') ? 'mp4' :
+          t.includes('mpeg') || t.includes('mp3') ? 'mp3' : t.includes('wav') ? 'wav' :
+          t.includes('ogg') ? 'ogg' : t.includes('flac') ? 'flac' : 'm4a';
+  }
   const fd = new FormData();
+  const sttModel = settings.sttModel || 'whisper-1';
   fd.append('file', blob, 'audio.' + ext);
-  fd.append('model', settings.sttModel || 'whisper-1');
-  fd.append('language', 'ko');
-  // 직전 문맥을 프롬프트로 넘겨 연속성 향상
-  if (transcript) fd.append('prompt', transcript.slice(-200));
+  fd.append('model', sttModel);
+  if (sttModel.includes('diarize')) {
+    // 화자 구분 모델: 전용 응답 형식 사용 (language/prompt 미지원)
+    fd.append('response_format', 'diarized_json');
+    fd.append('chunking_strategy', 'auto');
+  } else {
+    fd.append('language', 'ko');
+    // 직전 문맥을 프롬프트로 넘겨 연속성 향상
+    if (transcript) fd.append('prompt', transcript.slice(-200));
+  }
   const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + settings.apiKey },
@@ -853,6 +876,10 @@ async function whisper(blob) {
     throw new Error(err.error?.message || 'API 오류 ' + res.status);
   }
   const data = await res.json();
+  // 화자 구분 모델은 세그먼트별 (화자) 라벨을 붙여서 반환
+  if (Array.isArray(data.segments) && sttModel.includes('diarize')) {
+    return data.segments.map(s => (s.speaker ? `(화자 ${s.speaker}) ` : '') + (s.text||'').trim()).join('\n');
+  }
   return data.text || '';
 }
 
@@ -1038,6 +1065,7 @@ ${settings.template}
 - 게스트 명단에 있는 사람의 나눔은 일지에 절대 포함하지 마라 (타 팀 소속이라 이 일지에 기재하지 않는다).
 - 포럼팀장 본인의 나눔은 팀원과 같은 형식으로 포함하라.
 - 발언자가 원문에서 특정되면 그 이름을 쓰고, 불명확하면 문맥(제공된 팀원 명단)으로 추정하되 확신이 없으면 "미상"으로 표기.
+- 원문에 [이름] 태그가 있으면 그 발언의 발언자다. (화자 A) 같은 라벨이 있으면 같은 화자의 발언끼리 묶고, 나눔 순서(참여자 명단 순서)와 대조해 실제 이름을 추정하라.
 - 신앙 용어(주존심, 은혜의 리듬, 그리스도 이름, 신분 권세 등)는 발언자가 쓴 표현을 최대한 살려라.
 - 일지 본문이 끝난 뒤 반드시 아래 구분자와 함께 특이사항을 JSON 배열로 출력하라:
 ===특이사항===
