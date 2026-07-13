@@ -650,6 +650,15 @@ function participants() {
   return ordered;
 }
 function orderedMembers() { return participants().filter(p=>p.type==='member'); }
+/* 오늘 포럼 불참자 (출석부와 별개 — 예배는 왔어도 포럼만 빠질 수 있음) */
+let forumAbsent = store.get('forumAbsent', []);
+function activeParticipants() { return participants().filter(p=>!forumAbsent.includes(p.id)); }
+function toggleAbsent(id) {
+  forumAbsent = forumAbsent.includes(id) ? forumAbsent.filter(x=>x!==id) : [...forumAbsent, id];
+  store.set('forumAbsent', forumAbsent);
+  renderOrderList();
+  if (recording) updateSpeakerUI();
+}
 function addGuest() {
   const name = $('newGuestName').value.trim();
   if (!name) return;
@@ -664,16 +673,20 @@ function removeGuest(id) {
   renderOrderList();
 }
 function renderOrderList() {
-  $('orderList').innerHTML = participants().map((p, i) =>
-    `<div class="member-row">
-      <div class="member-name"><span class="sub">${i+1}.</span> ${p.name} ${p.type==='leader' ? '<span class="chip">팀장</span>' : p.type==='guest' ? '<span class="chip">게스트 · 일지 미기재</span>' : ''}</div>
+  let n = 0;
+  $('orderList').innerHTML = participants().map(p => {
+    const absent = forumAbsent.includes(p.id);
+    const num = absent ? '–' : ++n + '.';
+    return `<div class="member-row" style="${absent ? 'opacity:.45;' : ''}">
+      <div class="member-name"><span class="sub">${num}</span> ${absent ? '<s>'+p.name+'</s>' : p.name} ${p.type==='leader' ? '<span class="chip">팀장</span>' : p.type==='guest' ? '<span class="chip">게스트 · 일지 미기재</span>' : ''}</div>
       <div class="att-btns">
+        <button class="att-btn ${absent ? 'on-x' : 'on-o'}" onclick="toggleAbsent('${p.id}')">${absent ? '불참' : '참석'}</button>
         <button class="att-btn" onclick="moveOrder('${p.id}',-1)">▲</button>
         <button class="att-btn" onclick="moveOrder('${p.id}',1)">▼</button>
         ${p.type==='guest' ? `<button class="att-btn" onclick="removeGuest('${p.id}')">✕</button>` : ''}
       </div>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
 }
 function moveOrder(id, dir) {
   const ids = participants().map(p=>p.id);
@@ -685,11 +698,11 @@ function moveOrder(id, dir) {
   renderOrderList();
 }
 function currentSpeakerName() {
-  const om = participants();
+  const om = activeParticipants(); // 불참자는 순환에서 제외
   return om.length ? om[currentIdx % om.length].name : '';
 }
 function updateSpeakerUI() {
-  const show = recording && participants().length > 0;
+  const show = recording && activeParticipants().length > 0;
   $('speakerNow').style.display = show ? 'block' : 'none';
   if (show) $('speakerName').textContent = currentSpeakerName();
 }
@@ -1021,6 +1034,7 @@ ${settings.template}
 - 팀원 사이는 빈 줄로 구분.
 - 팀원별 나눔의 배치 순서는 제공된 팀원 명단 순서를 그대로 따르라.
 - 원문에 없는 내용을 지어내지 말 것. 나눔이 없었던 팀원은 아예 생략.
+- 녹음이 시끄러운 곳에서 진행되어 주변 다른 무리의 대화가 섞여 있을 수 있다. 참여자 명단의 나눔 흐름과 무관한 내용(다른 팀 대화, 잡담, 안내방송 등)은 무시하라.
 - 게스트 명단에 있는 사람의 나눔은 일지에 절대 포함하지 마라 (타 팀 소속이라 이 일지에 기재하지 않는다).
 - 포럼팀장 본인의 나눔은 팀원과 같은 형식으로 포함하라.
 - 발언자가 원문에서 특정되면 그 이름을 쓰고, 불명확하면 문맥(제공된 팀원 명단)으로 추정하되 확신이 없으면 "미상"으로 표기.
