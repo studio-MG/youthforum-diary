@@ -188,8 +188,9 @@
       <label class="fld">2부 말씀 제목</label>
       <input type="text" id="sermon2" placeholder="예: 요나의 표적보다 더 크신 예수 그리스도를 바라보라">
       <div class="row2">
-        <button class="ghost" onclick="document.getElementById('bulletinFile').click()">📷 주보 사진으로 자동 입력</button>
+        <button class="ghost" id="bulletinBtn" onclick="document.getElementById('bulletinFile').click()">📷 주보 사진으로 자동 입력</button>
       </div>
+      <div id="bulletinStatus" class="sub" style="margin-top:6px;"></div>
       <input type="file" id="bulletinFile" accept="image/*" style="display:none;" onchange="parseBulletin(this)">
       <div class="rec-circle" id="recCircle" onclick="toggleRecording()">
         <div class="ico" id="recIco">🎙️</div>
@@ -414,6 +415,28 @@ function toast(msg) {
   clearTimeout(toastTimer);
   // 긴 메시지(오류 등)는 읽을 시간을 충분히 줌
   toastTimer = setTimeout(()=>t.classList.remove('show'), Math.min(8000, 2200 + msg.length * 40));
+}
+
+/* 작업 완료/실패 알림 — 진동 + 알림음 + (백그라운드 시) 시스템 알림 */
+function requestNotifyPerm() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch(e){}
+}
+function notifyDone(msg, ok = true) {
+  try { navigator.vibrate && navigator.vibrate(ok ? [120,60,120] : [350,120,350]); } catch(e){}
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = ok ? 880 : 240;
+    g.gain.setValueAtTime(0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    o.start(); o.stop(ctx.currentTime + 0.45);
+  } catch(e){}
+  try {
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted')
+      new Notification('포럼팀장', { body: msg });
+  } catch(e){}
+  toast(msg);
 }
 
 /* ================= 네비게이션 ================= */
@@ -918,13 +941,29 @@ async function parseBulletin(input) {
   const f = input.files[0];
   if (!f) return;
   input.value = '';
-  toast('주보 분석 중...');
+  const btn = $('bulletinBtn'), st = $('bulletinStatus');
+  requestNotifyPerm();
+  btn.disabled = true;
+  let sec = 0;
+  const tick = setInterval(() => { sec++; st.textContent = `⏳ 주보 분석 중... ${sec}초 (모델에 따라 1분 이상 걸릴 수 있어요)`; }, 1000);
+  st.textContent = '⏳ 주보 분석 중...';
+  st.style.color = 'var(--yellow)';
   try {
+    // 사진을 최대 2000px JPEG로 축소 (전송 실패 방지 + 속도·비용 절감)
     const dataUrl = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result);
-      r.onerror = reject;
-      r.readAsDataURL(f);
+      const img = new Image();
+      const url = URL.createObjectURL(f);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, 3200 / Math.max(img.width, img.height)); // 작은 글씨 보존을 위해 고해상도 유지
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * scale);
+        cv.height = Math.round(img.height * scale);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        resolve(cv.toDataURL('image/jpeg', 0.92));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('이미지를 읽을 수 없습니다. 사진 형식(HEIC 등) 문제일 수 있으니 갤러리에서 JPG로 저장 후 다시 시도하세요')); };
+      img.src = url;
     });
     const raw = await callLLM(
       `이것은 교회 주보 이미지다. "말씀" 순서(설교 제목) 항목에서 1부와 2부의 말씀 제목을 찾아라.
@@ -937,19 +976,31 @@ async function parseBulletin(input) {
 JSON으로만 답하라. 형식: {"s1":"1부 말씀 제목 전문","s2":"2부 말씀 제목 전문"}`,
       [
         { type: 'input_text', text: '주보 이미지에서 1부/2부 말씀 제목을 추출하라.' },
-        { type: 'input_image', image_url: dataUrl }
+        { type: 'input_image', image_url: dataUrl, detail: 'high' }
       ]
     );
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('응답에서 제목을 해석하지 못했습니다');
     const parsed = JSON.parse(jsonMatch[0]);
-    if (!parsed.s1 && !parsed.s2) { toast('주보에서 말씀 제목을 찾지 못했습니다'); return; }
+    if (!parsed.s1 && !parsed.s2) {
+      st.textContent = '❌ 주보에서 말씀 제목을 찾지 못했습니다. 말씀 부분이 크게 나오게 다시 찍어보세요';
+      st.style.color = 'var(--red)';
+      notifyDone('주보 분석 실패 — 말씀 제목을 찾지 못했습니다', false);
+      return;
+    }
     if (parsed.s1) $('sermon1').value = parsed.s1;
     if (parsed.s2) $('sermon2').value = parsed.s2;
     store.set('sermons', { s1: $('sermon1').value, s2: $('sermon2').value });
-    toast('말씀 제목 자동 입력 완료! 확인 후 필요하면 수정하세요');
+    st.textContent = '✅ 말씀 제목 자동 입력 완료! 확인 후 필요하면 수정하세요';
+    st.style.color = 'var(--green)';
+    notifyDone('✅ 말씀 제목 자동 입력 완료!');
   } catch(e) {
-    toast('주보 분석 실패: ' + e.message);
+    st.textContent = '❌ 주보 분석 실패: ' + e.message;
+    st.style.color = 'var(--red)';
+    notifyDone('❌ 주보 분석 실패: ' + e.message, false);
+  } finally {
+    clearInterval(tick);
+    btn.disabled = false;
   }
 }
 
@@ -959,6 +1010,7 @@ async function transcribeUpload() {
   const f = $('audioFile').files[0];
   if (!f) { toast('파일을 선택하세요'); return; }
   if (f.size > 25 * 1024 * 1024) { toast('25MB 이하 파일만 가능합니다 (OpenAI 제한)'); return; }
+  requestNotifyPerm();
   toast('변환 중... 파일 길이에 따라 몇 분 걸릴 수 있어요');
   $('recStatus').textContent = '파일 변환 중...';
   $('recStatus').className = 'status-badge proc';
@@ -967,9 +1019,9 @@ async function transcribeUpload() {
     transcript += (transcript ? '\n' : '') + text.trim();
     renderLiveText();
     if (!$('forumDate').value) $('forumDate').value = today();
-    toast('변환 완료!');
+    notifyDone('✅ 파일 변환 완료!');
   } catch(e) {
-    toast('변환 실패: ' + e.message);
+    notifyDone('❌ 파일 변환 실패: ' + e.message, false);
   }
   $('recStatus').textContent = '대기 중';
   $('recStatus').className = 'status-badge';
@@ -1011,7 +1063,7 @@ function saveGeneratedLog(date, topic, body, extracted) {
   $('liveText').classList.add('empty');
   $('liveText').textContent = '녹음을 시작하면 여기에 텍스트가 쌓입니다';
   checkFinishReady();
-  toast('일지 생성 완료!' + (extracted.length ? ` 특이사항 ${extracted.length}건 추출` : ''));
+  notifyDone('✅ 일지 생성 완료!' + (extracted.length ? ` 특이사항 ${extracted.length}건 추출` : ''));
   showPage('logs');
   openLogEditor(log.id);
 }
@@ -1048,7 +1100,8 @@ function generateFreeReport() {
 async function generateReport() {
   if (!requireKey()) return;
   if (!transcript.trim()) { toast('변환된 텍스트가 없습니다'); return; }
-  toast('일지 생성 중...');
+  requestNotifyPerm();
+  toast('일지 생성 중... (모델에 따라 1분 이상 걸릴 수 있어요)');
   const date = $('forumDate').value || today();
   const { header, topic } = buildHeader(date);
 
@@ -1116,7 +1169,7 @@ ${transcript}`;
 
     saveGeneratedLog(date, topic, body, extracted);
   } catch(e) {
-    toast('생성 실패: ' + e.message);
+    notifyDone('❌ 일지 생성 실패: ' + e.message, false);
   }
 }
 
