@@ -280,6 +280,15 @@
   <!-- ============ 특이사항 ============ -->
   <div class="page" id="page-notes">
     <div class="card">
+      <h2>📋 팀원 상태 보고</h2>
+      <p class="sub" style="margin-bottom:8px;">최근 4주 출석과 상태 메모, 특이사항을 팀원별로 정리합니다. 상태 메모는 바로 입력·수정 가능해요.</p>
+      <div id="statusList"></div>
+      <div class="row2">
+        <button class="ghost" onclick="shareStatusReport(false)">📋 보고용 복사</button>
+        <button class="ghost" onclick="shareStatusReport(true)">💬 카톡 공유</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>⚠️ 특이사항</h2>
       <p class="sub" style="margin-bottom:8px;">기도제목, 심방 필요, 관심 필요한 팀원 등. 일지 생성 시 자동 추출되고 직접 추가할 수도 있습니다.</p>
       <textarea id="newNote" placeholder="예: OO이 다음 주 시험이라 기도 요청" style="min-height:60px;"></textarea>
@@ -448,16 +457,7 @@ function showPage(name) {
   if (name==='logs') renderLogs();
   if (name==='notes') renderNotes();
   if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; 
-    const sel = $('modelSelect');
-    if (settings.model && ![...sel.options].some(o=>o.value===settings.model)) {
-      sel.innerHTML += `<option value="${settings.model}">${settings.model}</option>`;
-    }
-    if (settings.model) sel.value = settings.model;
-    const sttSel = $('sttModelSelect');
-    if (settings.sttModel && ![...sttSel.options].some(o=>o.value===settings.sttModel)) {
-      sttSel.innerHTML += `<option value="${settings.sttModel}">${settings.sttModel}</option>`;
-    }
-    if (settings.sttModel) sttSel.value = settings.sttModel;
+    populateModelSelects();
   }
 }
 
@@ -503,6 +503,16 @@ async function callLLM(sys, userContent) {
 }
 
 /* API 키 검증 & 모델 목록 */
+function populateModelSelects() {
+  const sel = $('modelSelect');
+  const chatList = (settings.chatModels && settings.chatModels.length) ? settings.chatModels : ['gpt-4o'];
+  const current = settings.model || 'gpt-4o';
+  sel.innerHTML = [...new Set([...chatList, current])].map(id => `<option value="${id}" ${id===current?'selected':''}>${id}</option>`).join('');
+  const sttSel = $('sttModelSelect');
+  const sttList = (settings.sttModels && settings.sttModels.length) ? settings.sttModels : ['whisper-1'];
+  const sttCurrent = settings.sttModel || 'whisper-1';
+  sttSel.innerHTML = [...new Set([...sttList, sttCurrent])].map(id => `<option value="${id}" ${id===sttCurrent?'selected':''}>${id}</option>`).join('');
+}
 function disconnectKey() {
   if (!settings.apiKey && !$('apiKey').value) { toast('연결된 키가 없습니다'); return; }
   if (!confirm('API 키 연결을 해제할까요? (일지·출석 등 데이터는 유지됩니다)')) return;
@@ -533,18 +543,14 @@ async function verifyKey() {
     const chatModels = data.data.map(m=>m.id)
       .filter(id => /^(gpt-|o\d)/.test(id) && !exclude.test(id))
       .sort();
-    const sel = $('modelSelect');
-    const current = settings.model || 'gpt-4o';
-    sel.innerHTML = chatModels.map(id => `<option value="${id}" ${id===current?'selected':''}>${id}</option>`).join('')
-      || `<option value="gpt-4o">gpt-4o (기본값)</option>`;
     // 음성 변환(STT) 모델 목록
     const sttModels = data.data.map(m=>m.id)
       .filter(id => /whisper|transcribe/.test(id) && !/tts/.test(id))
       .sort();
-    const sttSel = $('sttModelSelect');
-    const sttCurrent = settings.sttModel || 'whisper-1';
-    sttSel.innerHTML = sttModels.map(id => `<option value="${id}" ${id===sttCurrent?'selected':''}>${id}</option>`).join('')
-      || `<option value="whisper-1">whisper-1 (기본값)</option>`;
+    // 모델 목록을 저장해서 앱을 다시 열어도 유지
+    settings.chatModels = chatModels;
+    settings.sttModels = sttModels;
+    populateModelSelects();
     // 키 저장
     settings.apiKey = key;
     store.set('settings', settings);
@@ -786,9 +792,22 @@ async function toggleRecording() {
 
 async function startRecording() {
   if (!requireKey()) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    notifyDone('이 브라우저에서는 녹음이 지원되지 않습니다. 크롬/사파리에서 HTTPS 주소로 접속하세요', false);
+    return;
+  }
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch(e) { toast('마이크 권한이 필요합니다'); return; }
+  } catch(e) {
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      notifyDone('마이크가 차단되어 있습니다.\n주소창의 자물쇠(🔒) 아이콘 → 권한 → 마이크 → 허용으로 바꾼 뒤 다시 시도하세요.\n(아이폰: 설정 앱 → Safari → 마이크 → 허용)', false);
+    } else if (e.name === 'NotFoundError') {
+      notifyDone('마이크 장치를 찾을 수 없습니다', false);
+    } else {
+      notifyDone('마이크를 열 수 없습니다: ' + e.message, false);
+    }
+    return;
+  }
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch(e){}
 
   recording = true;
@@ -1291,14 +1310,96 @@ function copyLog() {
   navigator.clipboard.writeText($('logBody').value).then(()=>toast('복사되었습니다'));
 }
 
+/* ================= 팀원 상태 보고 ================= */
+let memberMemos = store.get('memberMemos', {}); // { memberId: "상태 메모" }
+function recentSundays(n) {
+  const out = [];
+  const d = new Date(sundayOf(today()) + 'T00:00:00');
+  for (let i = 0; i < n; i++) { out.unshift(fmtDate(d)); d.setDate(d.getDate() - 7); }
+  return out;
+}
+function memberAttSummary(mid) {
+  return recentSundays(4).map(dd => {
+    const a = getAtt(dd, mid);
+    return a ? `${a.p1?'O':'X'}/${a.p2?'O':'X'}` : '·';
+  }).join(', ');
+}
+function memberNotes(name) {
+  return notes.filter(n => n.body.includes(name)).slice(0, 3);
+}
+function renderStatus() {
+  if (!members.length) { $('statusList').innerHTML = '<div class="empty">팀원을 먼저 등록하세요</div>'; return; }
+  $('statusList').innerHTML = members.map(m => {
+    const mn = memberNotes(m.name);
+    return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
+      <div style="font-weight:600;">${m.name} <span class="sub" style="font-weight:400;">출석(최근4주): ${memberAttSummary(m.id)}</span></div>
+      <input type="text" style="margin-top:6px; font-size:14px; padding:9px;" placeholder="상태 메모 (예: 시험기간, 심방 필요)"
+        value="${(memberMemos[m.id]||'').replace(/"/g,'&quot;')}" onchange="saveMemo('${m.id}', this.value)">
+      ${mn.length ? `<div class="sub" style="margin-top:6px;">${mn.map(n=>`· ${n.body} <span style="opacity:.6">(${n.date})</span>`).join('<br>')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+function saveMemo(id, val) {
+  memberMemos[id] = val.trim();
+  store.set('memberMemos', memberMemos);
+  toast('메모 저장됨');
+}
+function buildStatusReport() {
+  const lines = [`[포럼팀원 상태 보고] ${today()}`, ''];
+  members.forEach(m => {
+    lines.push(m.name);
+    lines.push(`- 출석(최근4주) : ${memberAttSummary(m.id)}`);
+    if (memberMemos[m.id]) lines.push(`- 상태 : ${memberMemos[m.id]}`);
+    const mn = memberNotes(m.name);
+    mn.forEach(n => lines.push(`- 특이사항 : ${n.body} (${n.date})`));
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+async function shareStatusReport(useShare) {
+  if (!members.length) { toast('팀원을 먼저 등록하세요'); return; }
+  const text = buildStatusReport();
+  if (useShare && navigator.share) {
+    try { await navigator.share({ title: '포럼팀원 상태 보고', text }); } catch(e){}
+  } else {
+    navigator.clipboard.writeText(text).then(()=>toast('보고 내용이 복사되었습니다'));
+  }
+}
+
 /* ================= 특이사항 ================= */
+let editingNoteId = null;
 function renderNotes() {
-  $('noteList').innerHTML = notes.map(n =>
-    `<div class="note-item">
-      <div class="d">${n.date} <button class="danger" style="float:right; padding:3px 10px; font-size:12px;" onclick="removeNote('${n.id}')">삭제</button></div>
+  renderStatus();
+  $('noteList').innerHTML = notes.map(n => {
+    if (n.id === editingNoteId) {
+      return `<div class="note-item">
+        <div class="d">${n.date}</div>
+        <textarea id="editNoteText" style="margin-top:6px; min-height:70px;">${n.body}</textarea>
+        <div class="row2">
+          <button class="primary" onclick="saveNoteEdit('${n.id}')">저장</button>
+          <button class="ghost" onclick="cancelNoteEdit()">취소</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="note-item">
+      <div class="d">${n.date}
+        <span style="float:right;">
+          <button class="dots-btn" style="font-size:14px; padding:3px 8px;" onclick="startNoteEdit('${n.id}')">✏️</button>
+          <button class="dots-btn" style="font-size:14px; padding:3px 8px; color:var(--red);" onclick="removeNote('${n.id}')">🗑</button>
+        </span>
+      </div>
       <div class="b">${n.body}</div>
-    </div>`
-  ).join('') || '<div class="empty">특이사항이 없습니다</div>';
+    </div>`;
+  }).join('') || '<div class="empty">특이사항이 없습니다</div>';
+}
+function startNoteEdit(id) { editingNoteId = id; renderNotes(); }
+function cancelNoteEdit() { editingNoteId = null; renderNotes(); }
+function saveNoteEdit(id) {
+  const n = notes.find(x=>x.id===id);
+  if (n) { n.body = $('editNoteText').value.trim(); store.set('notes', notes); }
+  editingNoteId = null;
+  renderNotes();
+  toast('수정되었습니다');
 }
 function addNote() {
   const body = $('newNote').value.trim();
