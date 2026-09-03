@@ -864,7 +864,11 @@ async function startRecording() {
     return;
   }
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      noiseSuppression: true,   // 주변 잡음 억제
+      echoCancellation: true,   // 반향(울림) 제거
+      autoGainControl: true     // 작은 목소리 자동 증폭
+    } });
   } catch(e) {
     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
       notifyDone('마이크가 차단되어 있습니다.\n주소창의 자물쇠(🔒) 아이콘 → 권한 → 마이크 → 허용으로 바꾼 뒤 다시 시도하세요.\n(아이폰: 설정 앱 → Safari → 마이크 → 허용)', false);
