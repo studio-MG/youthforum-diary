@@ -278,7 +278,14 @@
   <!-- ============ 포럼일지 ============ -->
   <div class="page" id="page-logs">
     <div class="card">
-      <h2>📖 포럼일지</h2>
+      <h2 style="display:flex; align-items:center; justify-content:space-between;">
+        <span>📖 포럼일지</span>
+        <span style="display:flex; align-items:center; gap:4px;">
+          <button class="dots-btn" style="font-size:16px;" onclick="moveLogMonth(-1)">◀</button>
+          <span id="logMonthLabel" style="font-size:14px; min-width:76px; text-align:center;"></span>
+          <button class="dots-btn" style="font-size:16px;" onclick="moveLogMonth(1)">▶</button>
+        </span>
+      </h2>
       <div id="logList"></div>
       <div style="margin-top:12px;">
         <button class="ghost" style="width:100%;" onclick="openLogEditor(null)">＋ 직접 작성</button>
@@ -1151,6 +1158,7 @@ function saveGeneratedLog(date, topic, body, extracted) {
   const log = { id: uid(), date, topic, body, transcript, createdAt: Date.now() };
   logs.unshift(log);
   store.set('logs', logs);
+  logMonth = date.slice(0,7); // 새 일지가 보이도록 해당 월로 이동
   extracted.forEach(t => notes.unshift({ id: uid(), date, body: t }));
   store.set('notes', notes);
   transcript = '';
@@ -1283,8 +1291,24 @@ ${transcript}`;
 
 /* ================= 포럼일지 ================= */
 let editingLogId = null;
+let logMonth = today().slice(0,7); // 'YYYY-MM'
+function moveLogMonth(delta) {
+  const [y, m] = logMonth.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  logMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  renderLogs();
+}
 function renderLogs() {
-  $('logList').innerHTML = logs.map(l =>
+  const [ly, lm] = logMonth.split('-').map(Number);
+  $('logMonthLabel').textContent = `${ly}년 ${lm}월`;
+  const monthLogs = logs.filter(l => (l.date||'').slice(0,7) === logMonth);
+  if (!monthLogs.length) {
+    const total = logs.length;
+    $('logList').innerHTML = `<div class="empty">${ly}년 ${lm}월에 작성된 일지가 없습니다`
+      + (total ? `<br><span style="font-size:13px;">◀ ▶ 로 다른 달을 확인하세요 (전체 ${total}개)</span>` : '') + '</div>';
+    return;
+  }
+  $('logList').innerHTML = monthLogs.map(l =>
     `<div class="log-item" style="display:flex; align-items:center; gap:4px;">
       <div style="flex:1; min-width:0;" onclick="openLogEditor('${l.id}')">
         <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''}</div>
@@ -1357,6 +1381,7 @@ function saveLog() {
     logs.unshift({ id: uid(), date, topic:'', body, createdAt: Date.now() });
   }
   store.set('logs', logs);
+  logMonth = date.slice(0,7); // 저장한 일지가 보이도록 해당 월로 이동
   closeModal('logModal');
   renderLogs();
   toast('저장되었습니다');
@@ -1548,6 +1573,34 @@ if (/KAKAOTALK/i.test(navigator.userAgent)) {
   <button style="margin-top:10px; background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600;" onclick="location.href='kakaotalk://web/openExternal?url='+encodeURIComponent(location.href)">기본 브라우저로 열기</button>`;
   document.body.insertBefore(warn, document.body.firstChild);
 }
+
+/* ===== 안드로이드 뒤로가기: 앱 종료 대신 화면 전환/모달 닫기 ===== */
+let backExitArmed = 0;
+function pushGuard() { try { history.pushState({ g:1 }, ''); } catch(e){} }
+(function initBackGuard(){
+  try { history.replaceState({ base:1 }, ''); } catch(e){}
+  pushGuard();
+  window.addEventListener('popstate', () => {
+    // 1) 컨텍스트 메뉴가 열려 있으면 닫기
+    if (document.querySelector('.ctx-menu')) { closeCtxMenu(); pushGuard(); return; }
+    // 2) 모달이 열려 있으면 닫기
+    const m = document.querySelector('.modal-bg.open');
+    if (m) {
+      m.classList.remove('open');
+      if (m.id === 'memberModal') renderAttendance();
+      pushGuard();
+      return;
+    }
+    // 3) 홈(포럼)이 아니면 홈으로
+    const active = document.querySelector('.page.active');
+    if (active && active.id !== 'page-forum') { showPage('forum'); pushGuard(); return; }
+    // 4) 홈에서 닫을 것이 없으면 → 두 번 눌러야 종료
+    if (Date.now() - backExitArmed < 2000) { history.back(); return; }
+    backExitArmed = Date.now();
+    toast('뒤로가기를 한 번 더 누르면 종료됩니다');
+    pushGuard();
+  });
+})();
 
 /* ================= 초기화 ================= */
 $('forumDate').value = today();
