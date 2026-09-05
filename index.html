@@ -172,6 +172,7 @@
   .c-event     { background:#16321f; color:#6fdc9a; }
   .c-prayer    { background:#3a3220; color:#e8c169; }
   .c-alert     { background:#3a2030; color:#f79999; }
+  .c-custom    { background:var(--card2); color:var(--sub); }
   .dots-btn {
     background:none; border:none; color:var(--sub); font-size:20px; cursor:pointer;
     padding: 6px 10px; border-radius:8px; flex:0 0 auto;
@@ -436,6 +437,7 @@
     <select id="noteMember"></select>
     <label class="fld">구분</label>
     <select id="noteCategory" onchange="onNoteCategoryChange()"></select>
+    <input type="text" id="noteCustomCat" placeholder="새 구분 이름 (예: 상담, 사역, 진로)" style="display:none; margin-top:8px;">
     <div id="trainingFields" style="display:none;">
       <label class="fld">참석 여부</label>
       <div style="display:flex; gap:6px;">
@@ -1534,7 +1536,15 @@ const NOTE_CATS = [
   ['prayer',    '기도제목', '🙏'],
   ['alert',     '꼭 알아야 할 내용', '⚠️']
 ];
-const catLabel = c => (NOTE_CATS.find(x=>x[0]===c) || [,'기타','•'])[1];
+let customCats = store.get('customCats', []); // 사용자가 직접 만든 구분 (라벨 문자열)
+const isBuiltinCat = c => NOTE_CATS.some(x => x[0] === c);
+// 내장 구분이면 라벨, 직접 만든 구분이면 그 이름 그대로, 구분 없으면 '' 반환
+const catLabel = c => {
+  if (!c) return '';
+  const hit = NOTE_CATS.find(x => x[0] === c);
+  return hit ? hit[1] : c;
+};
+const catClass = c => (!c ? '' : (isBuiltinCat(c) ? 'c-' + c : 'c-custom'));
 const catIcon  = c => (NOTE_CATS.find(x=>x[0]===c) || [,,'•'])[2];
 
 /* 기존 데이터(memberId 없는 평면 노트) 자동 마이그레이션 */
@@ -1567,7 +1577,7 @@ function renderNotes() {
 
   const rows = (items) => items.map(n => `
     <div class="nrow">
-      <div class="txt"><span class="chip-cat c-${n.category}">${catLabel(n.category)}</span>${
+      <div class="txt">${n.category ? `<span class="chip-cat ${catClass(n.category)}">${escapeHtml(catLabel(n.category))}</span>` : ''}${
         n.category==='training' && n.attend!==undefined ? (n.attend?'':'<b style="color:var(--red)">불참 · </b>') : ''
       }${escapeHtml(n.body)}</div>
       <div class="dt">${(n.date||'').slice(5).replace('-','/')}</div>
@@ -1590,7 +1600,7 @@ function renderNotes() {
         <span class="chev">▶</span>
       </div>
       ${open ? `<div class="mbody">
-        ${mine.length ? rows(mine) : '<div class="sub" style="font-size:13px; padding:4px 0;">기록된 항목이 없습니다</div>'}
+        ${mine.length ? rows(sortByCat(mine)) : '<div class="sub" style="font-size:13px; padding:4px 0;">기록된 항목이 없습니다</div>'}
         <input type="text" style="margin-top:10px; font-size:13px; padding:9px;" placeholder="한 줄 상태 (예: 회복 중 / 관심 필요)"
           value="${(memberMemos[m.id]||'').replace(/"/g,'&quot;')}" onchange="saveMemo('${m.id}', this.value)">
         <button class="ghost" style="width:100%; margin-top:8px; font-size:13px; padding:9px;" onclick="openNoteModal('${m.id}',null)">＋ 항목 추가</button>
@@ -1607,7 +1617,7 @@ function renderNotes() {
         <div class="meta">팀원 미지정 항목</div></div>
         <span class="cnt">${orphans.length}</span><span class="chev">▶</span>
       </div>
-      ${open ? `<div class="mbody">${rows(orphans)}</div>` : ''}
+      ${open ? `<div class="mbody">${rows(sortByCat(orphans))}</div>` : ''}
     </div>`;
   }
   el.innerHTML = html;
@@ -1623,29 +1633,45 @@ function openNoteModal(memberId, noteId) {
   editingNoteId = noteId;
   $('noteMember').innerHTML = '<option value="">(팀원 미지정)</option>' +
     members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
-  $('noteCategory').innerHTML = NOTE_CATS.map(([k,l,i]) => `<option value="${k}">${i} ${l}</option>`).join('');
+  $('noteCategory').innerHTML =
+      '<option value="">— 구분 없음 —</option>'
+    + NOTE_CATS.map(([k,l,i]) => `<option value="${k}">${i} ${l}</option>`).join('')
+    + (customCats.length ? '<optgroup label="내가 만든 구분">' +
+        customCats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('') + '</optgroup>' : '')
+    + '<option value="__new__">＋ 직접 입력…</option>';
   if (noteId) {
     const n = notes.find(x => x.id === noteId);
     $('noteModalTitle').textContent = '항목 수정';
     $('noteMember').value = n.memberId || '';
-    $('noteCategory').value = n.category || 'alert';
+    const c = n.category || '';
+    if (c && ![...$('noteCategory').options].some(o => o.value === c)) {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      $('noteCategory').insertBefore(opt, $('noteCategory').lastElementChild);
+    }
+    $('noteCategory').value = c;
     $('noteBody').value = n.body || '';
     $('noteDate').value = n.date || today();
     noteAttend = (n.attend === undefined) ? null : n.attend;
   } else {
     $('noteModalTitle').textContent = '항목 추가';
     $('noteMember').value = memberId || '';
-    $('noteCategory').value = 'spiritual';
+    $('noteCategory').value = '';
     $('noteBody').value = '';
     $('noteDate').value = today();
     noteAttend = null;
   }
+  $('noteCustomCat').value = '';
   onNoteCategoryChange();
   $('noteModal').classList.add('open');
 }
 function onNoteCategoryChange() {
-  const isTraining = $('noteCategory').value === 'training';
+  const v = $('noteCategory').value;
+  const isTraining = v === 'training';
+  const isNew = v === '__new__';
   $('trainingFields').style.display = isTraining ? 'block' : 'none';
+  $('noteCustomCat').style.display = isNew ? 'block' : 'none';
+  if (isNew) $('noteCustomCat').focus();
   $('noteBodyLabel').textContent = isTraining ? '훈련명 / 불참 사유' : '내용';
   $('noteBody').placeholder = isTraining ? '예: 제자훈련 — 회사 야근으로 불참' : '예: 말씀 붙잡고 회복 중';
   updateAttendBtns();
@@ -1661,14 +1687,23 @@ function saveNoteModal() {
   const body = $('noteBody').value.trim();
   if (!body) { toast('내용을 입력하세요'); return; }
   const mid = $('noteMember').value || null;
+  let cat = $('noteCategory').value;
+  if (cat === '__new__') {
+    cat = $('noteCustomCat').value.trim();
+    if (!cat) { toast('새 구분 이름을 입력하세요'); return; }
+    if (!isBuiltinCat(cat) && !customCats.includes(cat)) {
+      customCats.push(cat);
+      store.set('customCats', customCats);
+    }
+  }
   const data = {
     memberId: mid,
     memberName: mid ? (members.find(m=>m.id===mid)||{}).name : '',
-    category: $('noteCategory').value,
+    category: cat,
     body,
     date: $('noteDate').value || today()
   };
-  if (data.category === 'training' && noteAttend !== null) data.attend = noteAttend;
+  if (cat === 'training' && noteAttend !== null) data.attend = noteAttend;
   if (editingNoteId) {
     const n = notes.find(x=>x.id===editingNoteId);
     Object.assign(n, data);
@@ -1689,6 +1724,15 @@ function removeNote(id) {
 }
 
 /* ---- 보고서 생성 ---- */
+/* 내장 구분 순서 → 직접 만든 구분 → 구분 없음 순으로 정렬 */
+function sortByCat(items) {
+  const rank = c => {
+    if (!c) return 999;
+    const i = NOTE_CATS.findIndex(x => x[0] === c);
+    return i >= 0 ? i : 500;
+  };
+  return [...items].sort((a,b) => rank(a.category) - rank(b.category) || (b.date||'').localeCompare(a.date||''));
+}
 function buildStatusReport() {
   const recentOnly = $('reportRecentOnly') && $('reportRecentOnly').checked;
   const cutoff = (() => { const d = new Date(); d.setMonth(d.getMonth()-1); return fmtDate(d); })();
@@ -1707,13 +1751,10 @@ function buildStatusReport() {
     L.push(`   출석(최근4주) : ${memberAttSummary(m.id)}`);
     if (memberMemos[m.id]) L.push(`   상태 : ${memberMemos[m.id]}`);
     if (!mine.length) { L.push('   (기록된 항목 없음)'); L.push(''); return; }
-    NOTE_CATS.forEach(([key,label]) => {
-      const items = mine.filter(n=>n.category===key);
-      if (!items.length) return;
-      items.forEach(n => {
-        const att = (key === 'training' && n.attend !== undefined) ? (n.attend ? '[참석] ' : '[불참] ') : '';
-        L.push(`   · ${label} : ${att}${n.body} (${(n.date||'').slice(5)})`);
-      });
+    sortByCat(mine).forEach(n => {
+      const att = (n.category === 'training' && n.attend !== undefined) ? (n.attend ? '[참석] ' : '[불참] ') : '';
+      const lb = catLabel(n.category);
+      L.push(`   · ${lb ? lb + ' : ' : ''}${att}${n.body} (${(n.date||'').slice(5)})`);
     });
     L.push('');
   });
@@ -1722,7 +1763,10 @@ function buildStatusReport() {
   if (orphans.length) {
     L.push('──────────────────');
     L.push('▣ 기타 / 팀 전체');
-    orphans.forEach(n => L.push(`   · ${catLabel(n.category)} : ${n.body} (${(n.date||'').slice(5)})`));
+    sortByCat(orphans).forEach(n => {
+      const lb = catLabel(n.category);
+      L.push(`   · ${lb ? lb + ' : ' : ''}${n.body} (${(n.date||'').slice(5)})`);
+    });
     L.push('');
   }
   return L.join('\n').trim();
@@ -1739,7 +1783,7 @@ async function shareStatusReport(useShare) {
 
 /* ================= 백업 ================= */
 function exportData() {
-  const data = { members, attendance, logs, notes, dict, guests, leaderAtt, memberMemos, speakerOrder,
+  const data = { members, attendance, logs, notes, dict, guests, leaderAtt, memberMemos, speakerOrder, customCats,
     settings: { template: settings.template, leaderName: settings.leaderName }, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
   const a = document.createElement('a');
@@ -1759,6 +1803,7 @@ function importData(input) {
       if (d.logs) { logs = d.logs; store.set('logs', logs); }
       if (d.notes) { notes = d.notes; store.set('notes', notes); }
       if (d.dict) { dict = d.dict; store.set('dict', dict); }
+      if (d.customCats) { customCats = d.customCats; store.set('customCats', customCats); }
       if (d.guests) { guests = d.guests; store.set('guests', guests); }
       if (d.leaderAtt) { leaderAtt = d.leaderAtt; store.set('leaderAtt', leaderAtt); }
       if (d.memberMemos) { memberMemos = d.memberMemos; store.set('memberMemos', memberMemos); }
