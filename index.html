@@ -293,23 +293,26 @@
     </div>
   </div>
 
-  <!-- ============ 특이사항 ============ -->
+  <!-- ============ 팀원 리포트 ============ -->
   <div class="page" id="page-notes">
     <div class="card">
-      <h2>📋 팀원 상태 보고</h2>
-      <p class="sub" style="margin-bottom:8px;">최근 4주 출석과 상태 메모, 특이사항을 팀원별로 정리합니다. 상태 메모는 바로 입력·수정 가능해요.</p>
-      <div id="statusList"></div>
-      <div class="row2">
-        <button class="ghost" onclick="shareStatusReport(false)">📋 보고용 복사</button>
-        <button class="ghost" onclick="shareStatusReport(true)">💬 카톡 공유</button>
-      </div>
+      <h2 style="display:flex; align-items:center; justify-content:space-between;">
+        <span>📋 팀원 리포트</span>
+        <button class="ghost" style="padding:7px 12px; font-size:13px; flex:0 0 auto;" onclick="openNoteModal(null,null)">＋ 항목 추가</button>
+      </h2>
+      <p class="sub" style="margin-bottom:10px;">팀원별로 영적 상태·훈련 참석·축하·알림이 계속 누적됩니다. 포럼일지 생성 시 자동 분류되어 쌓입니다.</p>
+      <div id="reportList"></div>
     </div>
     <div class="card">
-      <h2>⚠️ 특이사항</h2>
-      <p class="sub" style="margin-bottom:8px;">기도제목, 심방 필요, 관심 필요한 팀원 등. 일지 생성 시 자동 추출되고 직접 추가할 수도 있습니다.</p>
-      <textarea id="newNote" placeholder="예: OO이 다음 주 시험이라 기도 요청" style="min-height:60px;"></textarea>
-      <div style="margin-top:8px;"><button class="primary" onclick="addNote()">추가</button></div>
-      <div id="noteList" style="margin-top:14px;"></div>
+      <h2>📤 보고서 내보내기</h2>
+      <p class="sub" style="margin-bottom:10px;">전도사님께 보고할 형식으로 정리됩니다.</p>
+      <label class="fld" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:0;">
+        <input type="checkbox" id="reportRecentOnly" style="width:auto;" checked onchange="renderNotes()"> 최근 1개월 항목만 포함
+      </label>
+      <div class="row2">
+        <button class="ghost" onclick="shareStatusReport(false)">📋 복사</button>
+        <button class="ghost" onclick="shareStatusReport(true)">💬 카톡 공유</button>
+      </div>
     </div>
   </div>
 
@@ -360,7 +363,7 @@
   <button class="active" data-page="forum" onclick="showPage('forum')"><span class="ico">🎙️</span>포럼</button>
   <button data-page="attendance" onclick="showPage('attendance')"><span class="ico">📅</span>출석부</button>
   <button data-page="logs" onclick="showPage('logs')"><span class="ico">📖</span>일지</button>
-  <button data-page="notes" onclick="showPage('notes')"><span class="ico">⚠️</span>특이사항</button>
+  <button data-page="notes" onclick="showPage('notes')"><span class="ico">📋</span>리포트</button>
 </nav>
 
 <!-- 팀원 관리 모달 -->
@@ -395,6 +398,32 @@
     <div class="row2">
       <button class="primary" onclick="saveLog()">저장</button>
       <button class="ghost" onclick="closeModal('logModal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 팀원 리포트 항목 모달 -->
+<div class="modal-bg" id="noteModal">
+  <div class="modal">
+    <h3 id="noteModalTitle">항목 추가</h3>
+    <label class="fld">대상 팀원</label>
+    <select id="noteMember"></select>
+    <label class="fld">구분</label>
+    <select id="noteCategory" onchange="onNoteCategoryChange()"></select>
+    <div id="trainingFields" style="display:none;">
+      <label class="fld">참석 여부</label>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="att-btn" id="attYes" onclick="setNoteAttend(true)">참석</button>
+        <button type="button" class="att-btn" id="attNo" onclick="setNoteAttend(false)">불참</button>
+      </div>
+    </div>
+    <label class="fld" id="noteBodyLabel">내용</label>
+    <textarea id="noteBody" style="min-height:80px;" placeholder="예: 제자훈련 불참 — 회사 야근"></textarea>
+    <label class="fld">날짜</label>
+    <input type="date" id="noteDate">
+    <div class="row2">
+      <button class="primary" onclick="saveNoteModal()">저장</button>
+      <button class="ghost" onclick="closeModal('noteModal')">닫기</button>
     </div>
   </div>
 </div>
@@ -1159,7 +1188,23 @@ function saveGeneratedLog(date, topic, body, extracted) {
   logs.unshift(log);
   store.set('logs', logs);
   logMonth = date.slice(0,7); // 새 일지가 보이도록 해당 월로 이동
-  extracted.forEach(t => notes.unshift({ id: uid(), date, body: t }));
+  // 구조화된 항목(객체) / 옛 형식(문자열) 모두 지원
+  extracted.forEach(t => {
+    if (typeof t === 'string') {
+      const hit = members.find(m => t.includes(m.name));
+      notes.unshift({ id: uid(), date, body: t, category: 'alert',
+        memberId: hit ? hit.id : null, memberName: hit ? hit.name : '' });
+      return;
+    }
+    const hit = members.find(m => m.name === (t.member||'').trim())
+             || members.find(m => (t.member||'') && (t.member||'').includes(m.name));
+    const valid = NOTE_CATS.some(c => c[0] === t.category);
+    const entry = { id: uid(), date, body: t.body || '',
+      category: valid ? t.category : 'alert',
+      memberId: hit ? hit.id : null, memberName: hit ? hit.name : '' };
+    if (t.category === 'training' && typeof t.attend === 'boolean') entry.attend = t.attend;
+    if (entry.body) notes.unshift(entry);
+  });
   store.set('notes', notes);
   transcript = '';
   speakerLog = [];
@@ -1250,10 +1295,22 @@ ${settings.template}
 - 원문에 [이름] 태그가 있으면 그 발언의 발언자다. (화자 A) 같은 라벨이 있으면 같은 화자의 발언끼리 묶고, 나눔 순서(참여자 명단 순서)와 대조해 실제 이름을 추정하라.
 - 신앙 용어(주존심, 은혜의 리듬, 그리스도 이름, 신분 권세 등)는 발언자가 쓴 표현을 최대한 살려라.
 ${dict.length ? '- 우리 팀이 자주 쓰는 표기는 다음과 같다. 원문에 비슷한 말이 있으면 이 표기로 통일하라: ' + dict.map(d=>d.right).join(', ') : ''}
-- 일지 본문이 끝난 뒤 반드시 아래 구분자와 함께 특이사항을 JSON 배열로 출력하라:
+- 일지 본문이 끝난 뒤 반드시 아래 구분자와 함께 팀원 관리에 필요한 항목을 JSON 배열로 출력하라:
 ===특이사항===
-["특이사항1", "특이사항2", ...]
-(특이사항: 기도제목, 심방/관심 필요, 다음 모임 공지, 팀원 근황 변화, 시험/취업/건강 등 개인 사정. 없으면 빈 배열 [])`;
+[{"member":"팀원이름","category":"카테고리","body":"내용","attend":true}]
+
+카테고리는 반드시 다음 5개 중 하나:
+- "spiritual" : 영적 상태 (믿음의 상태, 침체/회복, 씨름하는 문제, 은혜받은 내용)
+- "training"  : 청년부·교회 훈련/모임 참석 여부 (제자훈련, 전도훈련, 수련회, 집회 등). 참석했으면 "attend": true, 불참이면 "attend": false 를 넣고 body에 훈련명과 불참 사유를 쓴다. 예: {"member":"이수현","category":"training","body":"제자훈련 - 회사 야근으로 불참","attend":false}
+- "event"     : 행사 참여, 축하할 일 (합격, 취업, 생일, 결혼, 새로운 사역 시작 등)
+- "prayer"    : 기도제목
+- "alert"     : 팀장·전도사가 꼭 알아야 할 내용 (심방 필요, 장기 결석 조짐, 가정/건강 문제, 신앙적 위기)
+
+규칙:
+- member는 참여자 명단에 있는 이름을 정확히 쓴다. 특정 팀원과 무관한 팀 전체 내용이면 member를 ""(빈 문자열)로.
+- body는 20자 내외로 짧고 명확하게. 존댓말·군더더기 없이 개조식으로.
+- 한 사람에 대해 여러 항목이 있으면 각각 별도 객체로 나눈다.
+- 원문에 근거가 없으면 만들지 마라. 없으면 빈 배열 [].`;
 
   const usr = `포럼 날짜: ${date}
 
@@ -1438,95 +1495,209 @@ function memberAttSummary(mid) {
     return a ? `${a.p1?'O':'X'}/${a.p2?'O':'X'}` : '·';
   }).join(', ');
 }
-function memberNotes(name) {
-  return notes.filter(n => n.body.includes(name)).slice(0, 3);
-}
-function renderStatus() {
-  if (!members.length) { $('statusList').innerHTML = '<div class="empty">팀원을 먼저 등록하세요</div>'; return; }
-  $('statusList').innerHTML = members.map(m => {
-    const mn = memberNotes(m.name);
-    return `<div style="padding:10px 0; border-bottom:1px solid var(--border);">
-      <div style="font-weight:600;">${m.name} <span class="sub" style="font-weight:400;">출석(최근4주): ${memberAttSummary(m.id)}</span></div>
-      <input type="text" style="margin-top:6px; font-size:14px; padding:9px;" placeholder="상태 메모 (예: 시험기간, 심방 필요)"
-        value="${(memberMemos[m.id]||'').replace(/"/g,'&quot;')}" onchange="saveMemo('${m.id}', this.value)">
-      ${mn.length ? `<div class="sub" style="margin-top:6px;">${mn.map(n=>`· ${n.body} <span style="opacity:.6">(${n.date})</span>`).join('<br>')}</div>` : ''}
-    </div>`;
-  }).join('');
-}
 function saveMemo(id, val) {
   memberMemos[id] = val.trim();
   store.set('memberMemos', memberMemos);
   toast('메모 저장됨');
 }
-function buildStatusReport() {
-  const lines = [`[포럼팀원 상태 보고] ${today()}`, ''];
-  members.forEach(m => {
-    lines.push(m.name);
-    lines.push(`- 출석(최근4주) : ${memberAttSummary(m.id)}`);
-    if (memberMemos[m.id]) lines.push(`- 상태 : ${memberMemos[m.id]}`);
-    const mn = memberNotes(m.name);
-    mn.forEach(n => lines.push(`- 특이사항 : ${n.body} (${n.date})`));
-    lines.push('');
+/* ================= 팀원 리포트 (특이사항) ================= */
+const NOTE_CATS = [
+  ['spiritual', '영적상태', '🔥'],
+  ['training',  '훈련·모임', '📚'],
+  ['event',     '행사·축하', '🎉'],
+  ['prayer',    '기도제목', '🙏'],
+  ['alert',     '꼭 알아야 할 내용', '⚠️']
+];
+const catLabel = c => (NOTE_CATS.find(x=>x[0]===c) || [,'기타','•'])[1];
+const catIcon  = c => (NOTE_CATS.find(x=>x[0]===c) || [,,'•'])[2];
+
+/* 기존 데이터(memberId 없는 평면 노트) 자동 마이그레이션 */
+(function migrateNotes(){
+  let changed = false;
+  notes.forEach(n => {
+    if (!n.category) { n.category = 'alert'; changed = true; }
+    if (n.memberId === undefined) {
+      const hit = members.find(m => (n.body||'').includes(m.name));
+      n.memberId = hit ? hit.id : null;
+      n.memberName = hit ? hit.name : '';
+      changed = true;
+    }
   });
-  return lines.join('\n').trim();
+  if (changed) store.set('notes', notes);
+})();
+
+function notesOf(memberId) {
+  return notes.filter(n => n.memberId === memberId)
+              .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+}
+function renderNotes() {
+  const el = $('reportList');
+  if (!members.length) { el.innerHTML = '<div class="empty">출석부에서 팀원을 먼저 등록하세요</div>'; return; }
+  let html = members.map(m => {
+    const mine = notesOf(m.id);
+    const byCat = NOTE_CATS.map(([key,label,icon]) => {
+      const items = mine.filter(n => n.category === key);
+      if (!items.length) return '';
+      return `<div style="margin-top:8px;">
+        <div class="sub" style="font-size:12px;">${icon} ${label}</div>
+        ${items.map(n => `<div style="display:flex; align-items:flex-start; gap:6px; padding:4px 0 4px 6px;">
+          <div style="flex:1; font-size:14px; line-height:1.5;">${escapeHtml(n.body)}
+            <span class="sub" style="font-size:11px;"> (${(n.date||'').slice(5)})</span></div>
+          <button class="dots-btn" style="font-size:13px; padding:2px 6px;" onclick="openNoteModal('${m.id}','${n.id}')">✏️</button>
+          <button class="dots-btn" style="font-size:13px; padding:2px 6px; color:var(--red);" onclick="removeNote('${n.id}')">🗑</button>
+        </div>`).join('')}
+      </div>`;
+    }).join('');
+    return `<div style="padding:12px 0; border-bottom:1px solid var(--border);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="font-weight:700; font-size:15px; flex:1;">${m.name}
+          <span class="sub" style="font-weight:400; font-size:12px;">출석 ${memberAttSummary(m.id)}</span></div>
+        <button class="ghost" style="padding:5px 10px; font-size:12px; flex:0 0 auto;" onclick="openNoteModal('${m.id}',null)">＋</button>
+      </div>
+      <input type="text" style="margin-top:7px; font-size:13px; padding:8px;" placeholder="한 줄 상태 (예: 회복 중 / 관심 필요)"
+        value="${(memberMemos[m.id]||'').replace(/"/g,'&quot;')}" onchange="saveMemo('${m.id}', this.value)">
+      ${byCat || '<div class="sub" style="margin-top:8px; font-size:13px;">아직 기록된 항목이 없습니다</div>'}
+    </div>`;
+  }).join('');
+
+  // 팀원과 연결되지 않은 항목
+  const orphans = notes.filter(n => !n.memberId);
+  if (orphans.length) {
+    html += `<div style="padding:12px 0;">
+      <div style="font-weight:700; font-size:15px;">미분류 <span class="sub" style="font-weight:400; font-size:12px;">(팀원 미지정)</span></div>
+      ${orphans.map(n => `<div style="display:flex; align-items:flex-start; gap:6px; padding:4px 0 4px 6px;">
+        <div style="flex:1; font-size:14px; line-height:1.5;">${catIcon(n.category)} ${escapeHtml(n.body)}
+          <span class="sub" style="font-size:11px;"> (${(n.date||'').slice(5)})</span></div>
+        <button class="dots-btn" style="font-size:13px; padding:2px 6px;" onclick="openNoteModal(null,'${n.id}')">✏️</button>
+        <button class="dots-btn" style="font-size:13px; padding:2px 6px; color:var(--red);" onclick="removeNote('${n.id}')">🗑</button>
+      </div>`).join('')}
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+function escapeHtml(t) {
+  return String(t||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+/* ---- 항목 추가/수정 모달 ---- */
+let editingNoteId = null;
+let noteAttend = null; // 훈련 참석 여부
+function openNoteModal(memberId, noteId) {
+  editingNoteId = noteId;
+  $('noteMember').innerHTML = '<option value="">(팀원 미지정)</option>' +
+    members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  $('noteCategory').innerHTML = NOTE_CATS.map(([k,l,i]) => `<option value="${k}">${i} ${l}</option>`).join('');
+  if (noteId) {
+    const n = notes.find(x => x.id === noteId);
+    $('noteModalTitle').textContent = '항목 수정';
+    $('noteMember').value = n.memberId || '';
+    $('noteCategory').value = n.category || 'alert';
+    $('noteBody').value = n.body || '';
+    $('noteDate').value = n.date || today();
+    noteAttend = (n.attend === undefined) ? null : n.attend;
+  } else {
+    $('noteModalTitle').textContent = '항목 추가';
+    $('noteMember').value = memberId || '';
+    $('noteCategory').value = 'spiritual';
+    $('noteBody').value = '';
+    $('noteDate').value = today();
+    noteAttend = null;
+  }
+  onNoteCategoryChange();
+  $('noteModal').classList.add('open');
+}
+function onNoteCategoryChange() {
+  const isTraining = $('noteCategory').value === 'training';
+  $('trainingFields').style.display = isTraining ? 'block' : 'none';
+  $('noteBodyLabel').textContent = isTraining ? '훈련명 / 불참 사유' : '내용';
+  $('noteBody').placeholder = isTraining ? '예: 제자훈련 — 회사 야근으로 불참' : '예: 말씀 붙잡고 회복 중';
+  updateAttendBtns();
+}
+function setNoteAttend(v) { noteAttend = (noteAttend === v) ? null : v; updateAttendBtns(); }
+function updateAttendBtns() {
+  const y = $('attYes'), n = $('attNo');
+  if (!y || !n) return;
+  y.classList.toggle('on-o', noteAttend === true);
+  n.classList.toggle('on-x', noteAttend === false);
+}
+function saveNoteModal() {
+  const body = $('noteBody').value.trim();
+  if (!body) { toast('내용을 입력하세요'); return; }
+  const mid = $('noteMember').value || null;
+  const data = {
+    memberId: mid,
+    memberName: mid ? (members.find(m=>m.id===mid)||{}).name : '',
+    category: $('noteCategory').value,
+    body,
+    date: $('noteDate').value || today()
+  };
+  if (data.category === 'training' && noteAttend !== null) data.attend = noteAttend;
+  if (editingNoteId) {
+    const n = notes.find(x=>x.id===editingNoteId);
+    Object.assign(n, data);
+  } else {
+    notes.unshift({ id: uid(), ...data });
+  }
+  store.set('notes', notes);
+  editingNoteId = null;
+  closeModal('noteModal');
+  renderNotes();
+  toast('저장되었습니다');
+}
+function removeNote(id) {
+  if (!confirm('이 항목을 삭제할까요?')) return;
+  notes = notes.filter(n=>n.id!==id);
+  store.set('notes', notes);
+  renderNotes();
+}
+
+/* ---- 보고서 생성 ---- */
+function buildStatusReport() {
+  const recentOnly = $('reportRecentOnly') && $('reportRecentOnly').checked;
+  const cutoff = (() => { const d = new Date(); d.setMonth(d.getMonth()-1); return fmtDate(d); })();
+  const inRange = n => !recentOnly || (n.date || '') >= cutoff;
+
+  const L = [];
+  L.push(`[포럼팀 리포트] ${today()}`);
+  L.push(`포럼팀장 : ${settings.leaderName || 'OOO'}   ·   팀원 ${members.length}명`);
+  if (recentOnly) L.push(`(최근 1개월 기준)`);
+  L.push('');
+
+  members.forEach(m => {
+    const mine = notesOf(m.id).filter(inRange);
+    L.push('──────────────────');
+    L.push(`▣ ${m.name}`);
+    L.push(`   출석(최근4주) : ${memberAttSummary(m.id)}`);
+    if (memberMemos[m.id]) L.push(`   상태 : ${memberMemos[m.id]}`);
+    if (!mine.length) { L.push('   (기록된 항목 없음)'); L.push(''); return; }
+    NOTE_CATS.forEach(([key,label]) => {
+      const items = mine.filter(n=>n.category===key);
+      if (!items.length) return;
+      items.forEach(n => {
+        const att = (key === 'training' && n.attend !== undefined) ? (n.attend ? '[참석] ' : '[불참] ') : '';
+        L.push(`   · ${label} : ${att}${n.body} (${(n.date||'').slice(5)})`);
+      });
+    });
+    L.push('');
+  });
+
+  const orphans = notes.filter(n=>!n.memberId).filter(inRange);
+  if (orphans.length) {
+    L.push('──────────────────');
+    L.push('▣ 기타 / 팀 전체');
+    orphans.forEach(n => L.push(`   · ${catLabel(n.category)} : ${n.body} (${(n.date||'').slice(5)})`));
+    L.push('');
+  }
+  return L.join('\n').trim();
 }
 async function shareStatusReport(useShare) {
   if (!members.length) { toast('팀원을 먼저 등록하세요'); return; }
   const text = buildStatusReport();
   if (useShare && navigator.share) {
-    try { await navigator.share({ title: '포럼팀원 상태 보고', text }); } catch(e){}
+    try { await navigator.share({ title: '포럼팀 리포트', text }); } catch(e){}
   } else {
-    navigator.clipboard.writeText(text).then(()=>toast('보고 내용이 복사되었습니다'));
+    navigator.clipboard.writeText(text).then(()=>toast('보고서가 복사되었습니다'));
   }
-}
-
-/* ================= 특이사항 ================= */
-let editingNoteId = null;
-function renderNotes() {
-  renderStatus();
-  $('noteList').innerHTML = notes.map(n => {
-    if (n.id === editingNoteId) {
-      return `<div class="note-item">
-        <div class="d">${n.date}</div>
-        <textarea id="editNoteText" style="margin-top:6px; min-height:70px;">${n.body}</textarea>
-        <div class="row2">
-          <button class="primary" onclick="saveNoteEdit('${n.id}')">저장</button>
-          <button class="ghost" onclick="cancelNoteEdit()">취소</button>
-        </div>
-      </div>`;
-    }
-    return `<div class="note-item">
-      <div class="d">${n.date}
-        <span style="float:right;">
-          <button class="dots-btn" style="font-size:14px; padding:3px 8px;" onclick="startNoteEdit('${n.id}')">✏️</button>
-          <button class="dots-btn" style="font-size:14px; padding:3px 8px; color:var(--red);" onclick="removeNote('${n.id}')">🗑</button>
-        </span>
-      </div>
-      <div class="b">${n.body}</div>
-    </div>`;
-  }).join('') || '<div class="empty">특이사항이 없습니다</div>';
-}
-function startNoteEdit(id) { editingNoteId = id; renderNotes(); }
-function cancelNoteEdit() { editingNoteId = null; renderNotes(); }
-function saveNoteEdit(id) {
-  const n = notes.find(x=>x.id===id);
-  if (n) { n.body = $('editNoteText').value.trim(); store.set('notes', notes); }
-  editingNoteId = null;
-  renderNotes();
-  toast('수정되었습니다');
-}
-function addNote() {
-  const body = $('newNote').value.trim();
-  if (!body) return;
-  notes.unshift({ id: uid(), date: today(), body });
-  store.set('notes', notes);
-  $('newNote').value = '';
-  renderNotes();
-}
-function removeNote(id) {
-  notes = notes.filter(n=>n.id!==id);
-  store.set('notes', notes);
-  renderNotes();
 }
 
 /* ================= 백업 ================= */
