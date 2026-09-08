@@ -1336,6 +1336,7 @@ ${dict.length ? '- 우리 팀이 자주 쓰는 표기는 다음과 같다. 원�
 
 규칙:
 - member는 참여자 명단에 있는 이름을 정확히 쓴다. 특정 팀원과 무관한 팀 전체 내용이면 member를 ""(빈 문자열)로.
+- body에는 팀원 이름을 절대 넣지 마라. member 필드에 이미 이름이 있으므로 중복이다. (X: "홍길동 시험 합격" / O: "시험 합격")
 - body는 20자 내외로 짧고 명확하게. 존댓말·군더더기 없이 개조식으로.
 - 한 사람에 대해 여러 항목이 있으면 각각 별도 객체로 나눈다.
 - 원문에 근거가 없으면 만들지 마라. 없으면 빈 배열 [].`;
@@ -1575,11 +1576,11 @@ function renderNotes() {
   const el = $('reportList');
   if (!members.length) { el.innerHTML = '<div class="empty">출석부에서 팀원을 먼저 등록하세요</div>'; return; }
 
-  const rows = (items) => items.map(n => `
+  const rows = (items, ownerName) => items.map(n => `
     <div class="nrow">
       <div class="txt">${n.category ? `<span class="chip-cat ${catClass(n.category)}">${escapeHtml(catLabel(n.category))}</span>` : ''}${
         n.category==='training' && n.attend!==undefined ? (n.attend?'':'<b style="color:var(--red)">불참 · </b>') : ''
-      }${escapeHtml(n.body)}</div>
+      }${escapeHtml(stripName(n.body, ownerName))}</div>
       <div class="dt">${(n.date||'').slice(5).replace('-','/')}</div>
       <button class="dots-btn" style="font-size:12px; padding:1px 5px;" onclick="event.stopPropagation(); openNoteModal('${n.memberId||''}','${n.id}')">✏️</button>
       <button class="dots-btn" style="font-size:12px; padding:1px 5px; color:var(--red);" onclick="event.stopPropagation(); removeNote('${n.id}')">🗑</button>
@@ -1600,7 +1601,7 @@ function renderNotes() {
         <span class="chev">▶</span>
       </div>
       ${open ? `<div class="mbody">
-        ${mine.length ? rows(sortByCat(mine)) : '<div class="sub" style="font-size:13px; padding:4px 0;">기록된 항목이 없습니다</div>'}
+        ${mine.length ? rows(sortByCat(mine), m.name) : '<div class="sub" style="font-size:13px; padding:4px 0;">기록된 항목이 없습니다</div>'}
         <input type="text" style="margin-top:10px; font-size:13px; padding:9px;" placeholder="한 줄 상태 (예: 회복 중 / 관심 필요)"
           value="${(memberMemos[m.id]||'').replace(/"/g,'&quot;')}" onchange="saveMemo('${m.id}', this.value)">
         <button class="ghost" style="width:100%; margin-top:8px; font-size:13px; padding:9px;" onclick="openNoteModal('${m.id}',null)">＋ 항목 추가</button>
@@ -1617,10 +1618,19 @@ function renderNotes() {
         <div class="meta">팀원 미지정 항목</div></div>
         <span class="cnt">${orphans.length}</span><span class="chev">▶</span>
       </div>
-      ${open ? `<div class="mbody">${rows(sortByCat(orphans))}</div>` : ''}
+      ${open ? `<div class="mbody">${rows(sortByCat(orphans), '')}</div>` : ''}
     </div>`;
   }
   el.innerHTML = html;
+}
+/* 본문 앞의 팀원 이름 중복 제거 (카드 제목에 이미 이름이 있으므로) */
+function stripName(body, name) {
+  if (!name) return body;
+  let t = String(body || '').trim();
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // "홍길동 안녕" / "홍길동: 안녕" / "홍길동 - 안녕" / "홍길동은 ~" 등
+  t = t.replace(new RegExp('^' + esc + '\\s*(?:님)?\\s*(?:은|는|이|가|의|도)?\\s*[:：\\-–—,]?\\s*'), '');
+  return t.trim() || String(body || '').trim();
 }
 function escapeHtml(t) {
   return String(t||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -1754,7 +1764,7 @@ function buildStatusReport() {
     sortByCat(mine).forEach(n => {
       const att = (n.category === 'training' && n.attend !== undefined) ? (n.attend ? '[참석] ' : '[불참] ') : '';
       const lb = catLabel(n.category);
-      L.push(`   · ${lb ? lb + ' : ' : ''}${att}${n.body} (${(n.date||'').slice(5)})`);
+      L.push(`   · ${lb ? lb + ' : ' : ''}${att}${stripName(n.body, m.name)} (${(n.date||'').slice(5)})`);
     });
     L.push('');
   });
