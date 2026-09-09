@@ -366,8 +366,8 @@
       ※ <b>diarize</b>(화자 구분) 모델은 <b>녹음 파일을 통째로 업로드</b>할 때만 화자 A/B/C가 제대로 나뉩니다. 실시간 녹음은 음성을 잘라 보내기 때문에 매 구간이 "화자 A"로 나오므로, 실시간에는 <b>포럼 순서 + 다음 사람 버튼</b>을 쓰세요.</p>
       <label class="fld">포럼팀장 이름</label>
       <input type="text" id="leaderName" placeholder="예: 성민근">
-      <label class="fld">팀 이름 <span class="sub" style="font-size:12px;">(제출 시 전도사님 화면에 표시)</span></label>
-      <input type="text" id="teamName" placeholder="예: 1팀 / 요한팀">
+      <label class="fld">팀 이름 <span class="sub" style="font-size:12px;">(비워두면 “[팀장이름] 팀”으로 자동 지정)</span></label>
+      <input type="text" id="teamName" placeholder="자동: 홍길동 팀">
       <div style="margin-top:10px;"><button class="primary" onclick="saveSettings()">저장</button></div>
     </div>
     <div class="card">
@@ -420,7 +420,7 @@
       <button class="ghost" onclick="refreshLogAttendance()">🔄 출석 다시 반영</button>
     </div>
     <div class="row2">
-      <button class="primary" id="submitLogBtn" style="background:#2a6f4e;" onclick="submitLog()">📤 전도사님께 제출</button>
+      <button class="primary" id="submitLogBtn" style="background:#2a6f4e;" onclick="submitLog()">📤 제출하기</button>
     </div>
     <div id="submitStatus" class="sub" style="margin-top:8px;"></div>
     <div class="row2">
@@ -536,7 +536,7 @@ function showPage(name) {
   if (name==='attendance') renderAttendance();
   if (name==='logs') renderLogs();
   if (name==='notes') renderNotes();
-  if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; $('teamName').value = settings.teamName || ''; 
+  if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; $('teamName').value = settings.teamName || ''; $('teamName').placeholder = (settings.leaderName||'').trim() ? `자동: ${settings.leaderName.trim()} 팀` : '자동: 홍길동 팀'; 
     populateModelSelects();
   }
 }
@@ -1839,7 +1839,7 @@ function buildSubmitPayload(log) {
   return {
     schema: 1,
     localLogId: log.id,
-    teamName: (settings.teamName || '').trim(),
+    teamName: teamNameOf(),
     leaderName: (settings.leaderName || '').trim(),
     date: log.date,
     sundayOf: attDate,
@@ -1857,10 +1857,17 @@ function buildSubmitPayload(log) {
 
 let submitQueue = store.get('submitQueue', []);
 
+/* 팀 이름: 직접 입력한 값이 있으면 그것, 없으면 "[팀장이름] 팀" */
+function teamNameOf() {
+  const custom = (settings.teamName || '').trim();
+  if (custom) return custom;
+  const leader = (settings.leaderName || '').trim();
+  return leader ? `${leader} 팀` : '';
+}
 function submitLog() {
   if (!editingLogId) { toast('먼저 일지를 저장한 뒤 제출하세요'); return; }
-  if (!(settings.teamName || '').trim()) {
-    toast('설정에서 팀 이름을 먼저 입력하세요');
+  if (!teamNameOf()) {
+    toast('설정에서 포럼팀장 이름을 먼저 입력하세요');
     closeModal('logModal'); showPage('settings');
     return;
   }
