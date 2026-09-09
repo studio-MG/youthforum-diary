@@ -366,6 +366,8 @@
       ※ <b>diarize</b>(화자 구분) 모델은 <b>녹음 파일을 통째로 업로드</b>할 때만 화자 A/B/C가 제대로 나뉩니다. 실시간 녹음은 음성을 잘라 보내기 때문에 매 구간이 "화자 A"로 나오므로, 실시간에는 <b>포럼 순서 + 다음 사람 버튼</b>을 쓰세요.</p>
       <label class="fld">포럼팀장 이름</label>
       <input type="text" id="leaderName" placeholder="예: 성민근">
+      <label class="fld">팀 이름 <span class="sub" style="font-size:12px;">(제출 시 전도사님 화면에 표시)</span></label>
+      <input type="text" id="teamName" placeholder="예: 1팀 / 요한팀">
       <div style="margin-top:10px;"><button class="primary" onclick="saveSettings()">저장</button></div>
     </div>
     <div class="card">
@@ -417,6 +419,10 @@
     <div class="row2">
       <button class="ghost" onclick="refreshLogAttendance()">🔄 출석 다시 반영</button>
     </div>
+    <div class="row2">
+      <button class="primary" id="submitLogBtn" style="background:#2a6f4e;" onclick="submitLog()">📤 전도사님께 제출</button>
+    </div>
+    <div id="submitStatus" class="sub" style="margin-top:8px;"></div>
     <div class="row2">
       <button class="ghost" onclick="shareLog()">💬 카톡 공유</button>
       <button class="ghost" onclick="copyLog()">📋 복사</button>
@@ -530,7 +536,7 @@ function showPage(name) {
   if (name==='attendance') renderAttendance();
   if (name==='logs') renderLogs();
   if (name==='notes') renderNotes();
-  if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; 
+  if (name==='settings') { $('apiKey').value = settings.apiKey; $('templateText').value = settings.template; $('leaderName').value = settings.leaderName || ''; $('teamName').value = settings.teamName || ''; 
     populateModelSelects();
   }
 }
@@ -540,6 +546,7 @@ function saveSettings() {
   settings.apiKey = $('apiKey').value.trim();
   settings.template = $('templateText').value;
   settings.leaderName = $('leaderName').value.trim();
+  settings.teamName = $('teamName').value.trim();
   settings.model = $('modelSelect').value || 'gpt-4o';
   settings.sttModel = $('sttModelSelect').value || 'whisper-1';
   store.set('settings', settings);
@@ -1397,12 +1404,18 @@ function renderLogs() {
   $('logList').innerHTML = monthLogs.map(l =>
     `<div class="log-item" style="display:flex; align-items:center; gap:4px;">
       <div style="flex:1; min-width:0;" onclick="openLogEditor('${l.id}')">
-        <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''}</div>
+        <div class="d">${l.date}${l.topic ? ' · '+l.topic : ''} ${submitBadge(l)}</div>
         <div class="p">${(l.body||'').slice(0,60).replace(/\n/g,' ')}</div>
       </div>
       <button class="dots-btn" onclick="showLogMenu(event, '${l.id}')">⋮</button>
     </div>`
   ).join('') || '<div class="empty">아직 일지가 없습니다</div>';
+}
+function submitBadge(l) {
+  const queued = submitQueue.some(q => q.localLogId === l.id);
+  if (queued) return '<span class="chip-cat c-prayer">제출 대기</span>';
+  if (l.submittedAt) return '<span class="chip-cat c-event">제출됨</span>';
+  return '';
 }
 function closeCtxMenu() { document.querySelector('.ctx-menu')?.remove(); }
 function showLogMenu(ev, id) {
@@ -1456,6 +1469,7 @@ function openLogEditor(id) {
     $('logDate').value = today();
     $('logBody').value = '';
   }
+  renderSubmitStatus();
   $('logModal').classList.add('open');
 }
 function saveLog() {
@@ -1791,10 +1805,140 @@ async function shareStatusReport(useShare) {
   }
 }
 
+/* ================= 전도사님께 제출 ================= */
+/*
+ * 백엔드가 아직 연결되지 않았어도 제출을 누르면 "대기열"에 안전하게 보관되고,
+ * 서버(Firebase 등)가 연결되는 즉시 자동으로 전송됩니다.
+ * 나중에 BACKEND.send 만 구현하면 나머지는 그대로 동작합니다.
+ */
+const BACKEND = {
+  get enabled() { return false; },          // 서버 연결 시 true 로 바뀜
+  async send(payload) { throw new Error('서버 미연결'); }
+};
+
+/* 제출 payload: 전도사님이 보실 내용 전부를 담는다 */
+function buildSubmitPayload(log) {
+  const attDate = sundayOf(log.date);
+  const memberRows = members.map(m => {
+    const a = getAtt(attDate, m.id);
+    return {
+      name: m.name,
+      attendance: a ? { part1: !!a.p1, part2: !!a.p2 } : null,
+      memo: memberMemos[m.id] || '',
+      notes: notesOf(m.id)
+        .filter(n => (n.date || '') <= log.date)
+        .map(n => ({
+          date: n.date,
+          category: n.category || '',
+          categoryLabel: catLabel(n.category),
+          body: stripName(n.body, m.name),
+          attend: n.attend
+        }))
+    };
+  });
+  return {
+    schema: 1,
+    localLogId: log.id,
+    teamName: (settings.teamName || '').trim(),
+    leaderName: (settings.leaderName || '').trim(),
+    date: log.date,
+    sundayOf: attDate,
+    sermon1: (log.topic || '').split(' / ')[0] || '',
+    sermon2: (log.topic || '').split(' / ')[1] || '',
+    body: log.body || '',
+    members: memberRows,
+    teamNotes: notes.filter(n => !n.memberId).map(n => ({
+      date: n.date, category: n.category || '',
+      categoryLabel: catLabel(n.category), body: n.body
+    })),
+    submittedAt: new Date().toISOString()
+  };
+}
+
+let submitQueue = store.get('submitQueue', []);
+
+function submitLog() {
+  if (!editingLogId) { toast('먼저 일지를 저장한 뒤 제출하세요'); return; }
+  if (!(settings.teamName || '').trim()) {
+    toast('설정에서 팀 이름을 먼저 입력하세요');
+    closeModal('logModal'); showPage('settings');
+    return;
+  }
+  const log = logs.find(x => x.id === editingLogId);
+  if (!log) return;
+  // 화면에서 수정 중인 내용을 반영해 저장 후 제출
+  log.date = $('logDate').value || log.date;
+  log.body = $('logBody').value;
+  store.set('logs', logs);
+
+  const already = log.submittedAt;
+  if (already && !confirm('이미 제출한 일지입니다. 다시 제출할까요? (전도사님 화면이 최신 내용으로 갱신됩니다)')) return;
+
+  const payload = buildSubmitPayload(log);
+  submitQueue = submitQueue.filter(q => q.localLogId !== log.id); // 같은 일지는 최신 것만
+  submitQueue.push(payload);
+  store.set('submitQueue', submitQueue);
+
+  log.submitState = 'pending';
+  store.set('logs', logs);
+  flushSubmitQueue(true);
+  renderSubmitStatus();
+  renderLogs();
+}
+
+async function flushSubmitQueue(interactive) {
+  if (!submitQueue.length) return;
+  if (!BACKEND.enabled) {
+    if (interactive) {
+      notifyDone('📥 제출 대기 목록에 저장했습니다.\n서버 연결이 완료되면 자동으로 전송됩니다.');
+    }
+    return;
+  }
+  const rest = [];
+  let sent = 0;
+  for (const payload of submitQueue) {
+    try {
+      await BACKEND.send(payload);
+      const lg = logs.find(x => x.id === payload.localLogId);
+      if (lg) { lg.submittedAt = payload.submittedAt; lg.submitState = 'done'; }
+      sent++;
+    } catch (e) {
+      rest.push(payload);
+    }
+  }
+  submitQueue = rest;
+  store.set('submitQueue', submitQueue);
+  store.set('logs', logs);
+  if (sent && interactive) notifyDone(`✅ 제출 완료 (${sent}건)`);
+  else if (rest.length && interactive) notifyDone('❌ 제출 실패: 잠시 후 자동으로 다시 시도합니다', false);
+  renderLogs();
+  renderSubmitStatus();
+}
+
+function renderSubmitStatus() {
+  const el = $('submitStatus');
+  if (!el) return;
+  const log = logs.find(x => x.id === editingLogId);
+  if (!log) { el.textContent = ''; return; }
+  const queued = submitQueue.some(q => q.localLogId === log.id);
+  if (log.submittedAt && !queued) {
+    el.textContent = `✅ 제출됨 (${new Date(log.submittedAt).toLocaleString('ko-KR')})`;
+    el.style.color = 'var(--green)';
+  } else if (queued) {
+    el.textContent = BACKEND.enabled
+      ? '⏳ 전송 중...'
+      : '📥 제출 대기 중 — 서버 연결 시 자동 전송됩니다';
+    el.style.color = 'var(--yellow)';
+  } else {
+    el.textContent = '아직 제출하지 않았습니다';
+    el.style.color = 'var(--sub)';
+  }
+}
+
 /* ================= 백업 ================= */
 function exportData() {
   const data = { members, attendance, logs, notes, dict, guests, leaderAtt, memberMemos, speakerOrder, customCats,
-    settings: { template: settings.template, leaderName: settings.leaderName }, exportedAt: new Date().toISOString() };
+    submitQueue, settings: { template: settings.template, leaderName: settings.leaderName, teamName: settings.teamName }, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1820,6 +1964,8 @@ function importData(input) {
       if (d.speakerOrder) { speakerOrder = d.speakerOrder; store.set('speakerOrder', speakerOrder); }
       if (d.settings?.template) { settings.template = d.settings.template; }
       if (d.settings?.leaderName) { settings.leaderName = d.settings.leaderName; }
+      if (d.settings?.teamName) { settings.teamName = d.settings.teamName; }
+      if (d.submitQueue) { submitQueue = d.submitQueue; store.set('submitQueue', submitQueue); }
       store.set('settings', settings);
       toast('가져오기 완료');
       renderAttendance(); renderLogs(); renderNotes(); renderOrderList(); renderDict();
@@ -1868,6 +2014,7 @@ function pushGuard() { try { history.pushState({ g:1 }, ''); } catch(e){} }
 /* ================= 초기화 ================= */
 $('forumDate').value = today();
 renderOrderList();
+flushSubmitQueue(false); // 서버 연결 시 밀린 제출 자동 전송
 renderDict();
 const savedSermons = store.get('sermons', {});
 if (savedSermons.s1) $('sermon1').value = savedSermons.s1;
